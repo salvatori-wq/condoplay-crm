@@ -98,6 +98,22 @@ export async function setWebhook(webhookUrl: string) {
   return res.json();
 }
 
+// ═══ ENCODING WORKAROUND FOR EVOLUTION API UTF-8 BUG ═══
+// Evolution API infrastructure (nginx/Docker) discards non-ASCII bytes
+// Solution: Strip diacritics, keeping text readable in Portuguese
+// TODO: If Evolution API infra is fixed (nginx charset utf-8 + Docker LANG=C.UTF-8),
+//       remove this workaround and return text as-is
+
+function encodeBaileysWorkaround(text: string): string {
+  // Step 1: Decompose characters (NFD separates base + combining marks)
+  // "João" → "J" + "o" + "a" + combining_tilde + "o"
+  const decomposed = text.normalize('NFD');
+
+  // Step 2: Remove combining diacritical marks (accents, tildes, cedillas)
+  // "João" → "Joao", "São" → "Sao", "área" → "area"
+  return decomposed.replace(/[\u0300-\u036f]/g, '');
+}
+
 // ═══ MESSAGING ═══
 
 export async function sendTextMessage(phone: string, text: string) {
@@ -105,8 +121,8 @@ export async function sendTextMessage(phone: string, text: string) {
   const number = phone.replace(/\D/g, '').replace(/^0+/, '');
   const jid = number.includes('55') ? `${number}@s.whatsapp.net` : `55${number}@s.whatsapp.net`;
 
-  // Normalize Unicode to NFC (composed form) - standard for web
-  const normalizedText = text.normalize('NFC');
+  // Apply normalization workaround
+  const normalizedText = encodeBaileysWorkaround(text);
 
   const payload = {
     number: jid.replace('@s.whatsapp.net', ''),
@@ -115,11 +131,7 @@ export async function sendTextMessage(phone: string, text: string) {
 
   const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${INSTANCE_NAME}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Accept-Charset': 'utf-8',
-      apikey: EVOLUTION_API_KEY,
-    },
+    headers: headers(),
     body: JSON.stringify(payload),
   });
   return res.json();
