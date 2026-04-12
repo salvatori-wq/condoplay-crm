@@ -113,11 +113,11 @@ export async function POST(req: NextRequest) {
 
       // ═══ AUTO-RESPOND VIA LOKI — só se for lead do HAWKEYE ═══
       if (conversation.lead_id && conversation.agent_type === 'loki') {
-        console.log(`[Webhook] Lead do HAWKEYE respondeu. Acionando LOKI para conversa ${conversation.id}...`);
+        console.log(`[Webhook] Lead respondeu. Acionando LOKI para conversa ${conversation.id}...`);
         try {
           const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3002';
-          // Fire-and-forget — não bloqueia o webhook
-          fetch(`${appUrl}/api/agents/loki/respond`, {
+          // AWAIT the LOKI response to ensure it completes before webhook returns
+          const lokiRes = await fetch(`${appUrl}/api/agents/loki/respond`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -125,7 +125,9 @@ export async function POST(req: NextRequest) {
               conversationId: conversation.id,
               incomingMessage: text,
             }),
-          }).catch(err => console.error('[Webhook] LOKI auto-respond failed:', err));
+          });
+          const lokiData = await lokiRes.json();
+          console.log('[Webhook] LOKI responded:', lokiData.ok ? 'success' : 'failed');
         } catch (err) {
           console.error('[Webhook] Failed to trigger LOKI:', err);
         }
