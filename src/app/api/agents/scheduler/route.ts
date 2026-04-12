@@ -1,58 +1,52 @@
 // ═══ SCHEDULER — Orchestrador de Agentes Autônomos ═══
-// Chamado por cron job externo (Vercel Cron ou webhook).
-// Decide qual agente rodar baseado no horário atual (BRT).
+// Cron diário (08:00 BRT / 11:00 UTC, seg-sáb).
+// Executa TUDO em sequência:
+//   1. HAWKEYE: prospecção diária (10 leads)
+//   2. LOKI batch_contacts: contato inicial com leads novos
+//   3. LOKI batch_followups: FUPs (max 3 dias, depois 'perdido')
 //
-// Schedule (dias comerciais, seg-sáb):
-//   08:00 — HAWKEYE: prospecção diária (10 leads)
-//   09:00 — LOKI batch_contacts (3 primeiros contatos)
-//   10:00 — LOKI batch_contacts (3 contatos)
-//   11:00 — LOKI batch_contacts (4 contatos)
-//   08-18h — LOKI batch_followups (FUPs em horário aleatório)
+// Respostas 24/7 são feitas pelo webhook (não depende do cron).
 
 import { NextResponse } from 'next/server';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3002';
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL
+  ? `https://${process.env.VERCEL_URL}`
+  : 'http://localhost:3002';
 
 export async function POST(req: Request) {
   const now = getBrazilTime();
   const hour = now.getHours();
-  const dayOfWeek = now.getDay(); // 0=dom, 6=sáb
+  const dayOfWeek = now.getDay();
 
   const actions: string[] = [];
   const results: Record<string, unknown> = {};
 
   try {
-    // ═══ 08:00 (seg-sáb) — HAWKEYE prospecção (1x/dia) ═══
-    if (hour === 8 && dayOfWeek >= 1 && dayOfWeek <= 6) {
-      console.log('[Scheduler] Triggering HAWKEYE...');
-      const hawkeyeRes = await callAgent('hawkeye/run', 'POST');
-      results.hawkeye = hawkeyeRes;
-      actions.push('hawkeye');
-    }
+    // ═══ STEP 1: HAWKEYE prospecção (10 leads/dia) ═══
+    console.log('[Scheduler] Step 1: HAWKEYE prospecting...');
+    const hawkeyeRes = await callAgent('hawkeye/run', 'POST');
+    results.hawkeye = hawkeyeRes;
+    actions.push('hawkeye');
 
-    // ═══ 09:00, 10:00, 11:00 (seg-sáb) — LOKI batch contacts ═══
-    if ([9, 10, 11].includes(hour) && dayOfWeek >= 1 && dayOfWeek <= 6) {
-      console.log(`[Scheduler] Triggering LOKI batch_contacts (${hour}h)...`);
-      const lokiRes = await callAgent('loki/respond', 'POST', {
-        action: 'batch_contacts',
-        metadata: { scheduled_hour: hour },
-      });
-      results.loki_batch = lokiRes;
-      actions.push(`loki_batch_${hour}h`);
-    }
+    // Espera 5s para leads serem inseridos no DB
+    await sleep(5000);
 
-    // ═══ TODAS AS HORAS, TODOS OS DIAS — LOKI batch followups ═══
-    // FUPs: máximo 3 dias (3 mensagens), depois marca como 'perdido'
-    // Roda a cada hora com probabilidade para distribuir carga
-    const shouldRunFup = await shouldRunFollowups();
-    if (shouldRunFup) {
-      console.log('[Scheduler] Triggering LOKI batch_followups...');
-      const fupRes = await callAgent('loki/respond', 'POST', {
-        action: 'batch_followups',
-      });
-      results.loki_fup = fupRes;
-      actions.push('loki_followups');
-    }
+    // ═══ STEP 2: LOKI batch_contacts (contato inicial) ═══
+    console.log('[Scheduler] Step 2: LOKI batch contacts...');
+    const lokiRes = await callAgent('loki/respond', 'POST', {
+      action: 'batch_contacts',
+      metadata: { scheduled_hour: hour },
+    });
+    results.loki_batch = lokiRes;
+    actions.push('loki_batch');
+
+    // ═══ STEP 3: LOKI batch_followups (FUPs pendentes) ═══
+    console.log('[Scheduler] Step 3: LOKI followups...');
+    const fupRes = await callAgent('loki/respond', 'POST', {
+      action: 'batch_followups',
+    });
+    results.loki_fup = fupRes;
+    actions.push('loki_followups');
 
     return NextResponse.json({
       ok: true,
@@ -65,7 +59,7 @@ export async function POST(req: Request) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[Scheduler] Error:', msg);
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    return NextResponse.json({ ok: false, error: msg, actions, results }, { status: 500 });
   }
 }
 
@@ -73,6 +67,7 @@ export async function POST(req: Request) {
 // GET /api/agents/scheduler?force=hawkeye
 // GET /api/agents/scheduler?force=loki_batch
 // GET /api/agents/scheduler?force=loki_fup
+// GET /api/agents/scheduler?force=all
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -88,16 +83,22 @@ export async function GET(req: Request) {
       day: now.getDay(),
       is_business_day: now.getDay() !== 0,
       schedule: {
-        '08:00': 'HAWKEYE prospecção',
-        '09:00': 'LOKI 3 contatos',
-        '10:00': 'LOKI 3 contatos',
-        '11:00': 'LOKI 4 contatos',
-        '08-18h': 'LOKI FUPs (aleatório)',
+        cron: '08:00 BRT (seg-sáb)',
+        step_1: 'HAWKEYE prospecção (10 leads)',
+        step_2: 'LOKI batch_contacts (contato inicial)',
+        step_3: 'LOKI batch_followups (FUPs max 3 dias)',
+        webhook: 'Respostas 24/7 (auto via Evolution API)',
       },
     });
   }
 
-  // Force-run specific agent
+  // Force-run specific agent or all
+  if (force === 'all') {
+    // Simulate full daily run
+    const fakeReq = new Request(url.toString(), { method: 'POST' });
+    return POST(fakeReq);
+  }
+
   let result;
   switch (force) {
     case 'hawkeye':
@@ -119,8 +120,12 @@ export async function GET(req: Request) {
 // ═══ HELPERS ═══
 
 async function callAgent(path: string, method: string, body?: unknown): Promise<unknown> {
+  const baseUrl = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3002');
+
   try {
-    const res = await fetch(`${APP_URL}/api/agents/${path}`, {
+    const res = await fetch(`${baseUrl}/api/agents/${path}`, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined,
@@ -134,15 +139,11 @@ async function callAgent(path: string, method: string, body?: unknown): Promise<
 }
 
 function getBrazilTime(): Date {
-  // UTC-3 (horário de Brasília)
   const now = new Date();
   const utc = now.getTime() + now.getTimezoneOffset() * 60000;
   return new Date(utc - 3 * 3600000);
 }
 
-async function shouldRunFollowups(): Promise<boolean> {
-  // Simple: run FUPs once per hour with 20% probability
-  // This means ~2 FUP runs per business day (10h window * 20%)
-  // In production, use a flag in the DB to ensure exactly 1 run/day
-  return Math.random() < 0.2;
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
