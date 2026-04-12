@@ -6,7 +6,7 @@ const INSTANCE_NAME = process.env.NEXT_PUBLIC_EVOLUTION_INSTANCE || 'condoplay';
 
 function headers() {
   return {
-    'Content-Type': 'application/json',
+    'Content-Type': 'application/json; charset=utf-8',
     apikey: EVOLUTION_API_KEY,
   };
 }
@@ -105,13 +105,19 @@ export async function sendTextMessage(phone: string, text: string) {
   const number = phone.replace(/\D/g, '').replace(/^0+/, '');
   const jid = number.includes('55') ? `${number}@s.whatsapp.net` : `55${number}@s.whatsapp.net`;
 
+  // Ensure proper UTF-8 encoding
+  const payload = {
+    number: jid.replace('@s.whatsapp.net', ''),
+    text: text, // Explicitly preserve UTF-8 characters
+  };
+
   const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${INSTANCE_NAME}`, {
     method: 'POST',
-    headers: headers(),
-    body: JSON.stringify({
-      number: jid.replace('@s.whatsapp.net', ''),
-      text,
-    }),
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      apikey: EVOLUTION_API_KEY,
+    },
+    body: JSON.stringify(payload),
   });
   return res.json();
 }
