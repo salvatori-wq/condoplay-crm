@@ -3,7 +3,19 @@
 export type AgentType = 'hawkeye' | 'loki' | 'fury' | 'jarvis' | 'vision' | 'stark' | 'storm' | 'tibia';
 export type LeadStatus = 'prospectado' | 'em_contato' | 'reuniao' | 'proposta' | 'fechado' | 'perdido';
 export type CondoStatus = 'implantacao' | 'ativo' | 'pausado' | 'cancelado';
-export type ConversationStatus = 'ativo' | 'aguardando' | 'encerrado' | 'alerta';
+export type ConversationStatus = 'ativo' | 'aguardando' | 'encerrado' | 'alerta' | 'perdido';
+
+export type LossReason = 'preco_alto' | 'sem_interesse' | 'concorrente' | 'sem_resposta' | 'timing_errado' | 'fora_icp' | 'outro';
+
+export const LOSS_REASONS: Record<LossReason, string> = {
+  preco_alto: 'Preco alto',
+  sem_interesse: 'Sem interesse',
+  concorrente: 'Escolheu concorrente',
+  sem_resposta: 'Sem resposta',
+  timing_errado: 'Timing errado',
+  fora_icp: 'Fora do ICP',
+  outro: 'Outro',
+};
 export type InvoiceStatus = 'pendente' | 'pago' | 'atrasado' | 'cancelado';
 export type ContentType = 'carrossel' | 'post' | 'reels' | 'story';
 export type Difficulty = 'facil' | 'medio' | 'dificil';
@@ -101,12 +113,26 @@ export interface Conversation {
   agent_type: AgentType;
   channel: Channel;
   contact_name: string | null;
+  contact_phone: string | null;
   contact_role: string | null;
   status: ConversationStatus;
   unread: number;
+  archived: boolean;
+  loss_reason: string | null;
+  loss_notes: string | null;
   created_at: string;
   updated_at: string;
   messages?: Message[];
+}
+
+export interface AgentConfig {
+  id: string;
+  tenant_id: string;
+  agent_type: AgentType;
+  paused: boolean;
+  paused_at: string | null;
+  paused_by: string | null;
+  updated_at: string;
 }
 
 export interface Message {

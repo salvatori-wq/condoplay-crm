@@ -108,13 +108,31 @@ create table conversations (
   agent_type text not null check (agent_type in ('hawkeye','loki','fury','jarvis','vision','stark','storm','tibia')),
   channel text default 'whatsapp' check (channel in ('whatsapp','email','instagram','interno')),
   contact_name text,
+  contact_phone text,
   contact_role text,
-  status text default 'ativo' check (status in ('ativo','aguardando','encerrado','alerta')),
+  status text default 'ativo' check (status in ('ativo','aguardando','encerrado','alerta','perdido')),
   unread integer default 0,
+  archived boolean default false,
+  loss_reason text,
+  loss_notes text,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
 create index idx_conversations_tenant on conversations(tenant_id);
+create index idx_conversations_active on conversations(tenant_id, archived) where archived = false;
+
+-- ═══ AGENT CONFIG ═══
+create table agent_config (
+  id uuid primary key default uuid_generate_v4(),
+  tenant_id uuid not null references tenants(id),
+  agent_type text not null,
+  paused boolean default false,
+  paused_at timestamptz,
+  paused_by text,
+  updated_at timestamptz default now(),
+  unique(tenant_id, agent_type)
+);
+create index idx_agent_config_tenant on agent_config(tenant_id);
 
 -- ═══ MESSAGES ═══
 create table messages (

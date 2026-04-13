@@ -20,8 +20,11 @@ export async function POST(req: NextRequest) {
     // Normalize phone
     const normalizedPhone = phone.replace(/\D/g, '').replace(/^0+/, '');
 
+    // Strip diacritics for Evolution API compatibility (UTF-8 bug workaround)
+    const safeText = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
     // Send via Evolution API
-    const result = await sendTextMessage(normalizedPhone, text);
+    const result = await sendTextMessage(normalizedPhone, safeText);
 
     // Find or create conversation
     let convId = conversationId;

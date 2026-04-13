@@ -8,10 +8,28 @@
 // Respostas 24/7 são feitas pelo webhook (não depende do cron).
 
 import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+);
+
+const DEFAULT_TENANT_ID = 'aaaa0001-0000-0000-0000-000000000001';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
   : 'http://localhost:3002';
+
+async function isAgentPaused(agentType: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('agent_config')
+    .select('paused')
+    .eq('agent_type', agentType)
+    .eq('tenant_id', DEFAULT_TENANT_ID)
+    .single();
+  return data?.paused === true;
+}
 
 export async function POST(req: Request) {
   const now = getBrazilTime();
@@ -20,37 +38,49 @@ export async function POST(req: Request) {
 
   const actions: string[] = [];
   const results: Record<string, unknown> = {};
+  const skipped: string[] = [];
 
   try {
     // ═══ STEP 1: HAWKEYE prospecção (10 leads/dia) ═══
-    console.log('[Scheduler] Step 1: HAWKEYE prospecting...');
-    const hawkeyeRes = await callAgent('hawkeye/run', 'POST');
-    results.hawkeye = hawkeyeRes;
-    actions.push('hawkeye');
+    if (await isAgentPaused('hawkeye')) {
+      console.log('[Scheduler] HAWKEYE is PAUSED. Skipping.');
+      skipped.push('hawkeye');
+    } else {
+      console.log('[Scheduler] Step 1: HAWKEYE prospecting...');
+      const hawkeyeRes = await callAgent('hawkeye/run', 'POST');
+      results.hawkeye = hawkeyeRes;
+      actions.push('hawkeye');
+    }
 
     // Espera 5s para leads serem inseridos no DB
     await sleep(5000);
 
     // ═══ STEP 2: LOKI batch_contacts (contato inicial) ═══
-    console.log('[Scheduler] Step 2: LOKI batch contacts...');
-    const lokiRes = await callAgent('loki/respond', 'POST', {
-      action: 'batch_contacts',
-      metadata: { scheduled_hour: hour },
-    });
-    results.loki_batch = lokiRes;
-    actions.push('loki_batch');
+    if (await isAgentPaused('loki')) {
+      console.log('[Scheduler] LOKI is PAUSED. Skipping batch contacts & followups.');
+      skipped.push('loki_batch', 'loki_followups');
+    } else {
+      console.log('[Scheduler] Step 2: LOKI batch contacts...');
+      const lokiRes = await callAgent('loki/respond', 'POST', {
+        action: 'batch_contacts',
+        metadata: { scheduled_hour: hour },
+      });
+      results.loki_batch = lokiRes;
+      actions.push('loki_batch');
 
-    // ═══ STEP 3: LOKI batch_followups (FUPs pendentes) ═══
-    console.log('[Scheduler] Step 3: LOKI followups...');
-    const fupRes = await callAgent('loki/respond', 'POST', {
-      action: 'batch_followups',
-    });
-    results.loki_fup = fupRes;
-    actions.push('loki_followups');
+      // ═══ STEP 3: LOKI batch_followups (FUPs pendentes) ═══
+      console.log('[Scheduler] Step 3: LOKI followups...');
+      const fupRes = await callAgent('loki/respond', 'POST', {
+        action: 'batch_followups',
+      });
+      results.loki_fup = fupRes;
+      actions.push('loki_followups');
+    }
 
     return NextResponse.json({
       ok: true,
       actions,
+      skipped,
       results,
       time: now.toISOString(),
       hour,

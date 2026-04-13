@@ -30,7 +30,8 @@ export const MOCK_AGENT_LOGS: AgentLog[] = [
 export const MOCK_CONVERSATIONS: (Conversation & { messages: Message[] })[] = [
   {
     id: 'c1', tenant_id: 't1', lead_id: 'l1', condo_id: null, agent_type: 'loki', channel: 'whatsapp',
-    contact_name: 'Carlos Mendes', contact_role: 'Sindico Prof.', status: 'ativo', unread: 2,
+    contact_name: 'Carlos Mendes', contact_phone: '11999001234', contact_role: 'Sindico Prof.', status: 'ativo', unread: 2,
+    archived: false, loss_reason: null, loss_notes: null,
     created_at: '2026-04-11T14:30:00Z', updated_at: '2026-04-11T14:41:00Z',
     messages: [
       { id: 'm1', conversation_id: 'c1', from_type: 'agent', content: 'Boa tarde Carlos! Sou da Condo Play 🎮 Vi que voce administra 12 condominios na Zona Sul. Temos uma solucao que transforma a area de lazer em um espaco de convivencia com jogos de tabuleiro premium.', metadata: {}, created_at: '2026-04-11T14:30:00Z' },
@@ -44,7 +45,8 @@ export const MOCK_CONVERSATIONS: (Conversation & { messages: Message[] })[] = [
   },
   {
     id: 'c2', tenant_id: 't1', lead_id: 'l2', condo_id: null, agent_type: 'loki', channel: 'whatsapp',
-    contact_name: 'Ana Rocha', contact_role: 'Sindica', status: 'aguardando', unread: 0,
+    contact_name: 'Ana Rocha', contact_phone: '11998765432', contact_role: 'Sindica', status: 'aguardando', unread: 0,
+    archived: false, loss_reason: null, loss_notes: null,
     created_at: '2026-04-11T10:15:00Z', updated_at: '2026-04-11T11:03:00Z',
     messages: [
       { id: 'm8', conversation_id: 'c2', from_type: 'agent', content: 'Bom dia Ana! Aqui e da Condo Play. Vi seu perfil no SindicoNet — o Jardim das Acacias tem uma area de lazer incrivel. Ja pensou em adicionar jogos de tabuleiro como opcao pros moradores?', metadata: {}, created_at: '2026-04-11T10:15:00Z' },
@@ -56,7 +58,8 @@ export const MOCK_CONVERSATIONS: (Conversation & { messages: Message[] })[] = [
   },
   {
     id: 'c3', tenant_id: 't1', lead_id: null, condo_id: 'cd1', agent_type: 'jarvis', channel: 'whatsapp',
-    contact_name: 'Marina (Apto 304)', contact_role: 'Moradora', status: 'ativo', unread: 1,
+    contact_name: 'Marina (Apto 304)', contact_phone: null, contact_role: 'Moradora', status: 'ativo', unread: 1,
+    archived: false, loss_reason: null, loss_notes: null,
     created_at: '2026-04-11T14:20:00Z', updated_at: '2026-04-11T14:24:00Z',
     messages: [
       { id: 'm13', conversation_id: 'c3', from_type: 'contact', content: 'Oi! Queria pegar o Catan mas nunca joguei. E dificil?', metadata: {}, created_at: '2026-04-11T14:20:00Z' },
@@ -67,7 +70,8 @@ export const MOCK_CONVERSATIONS: (Conversation & { messages: Message[] })[] = [
   },
   {
     id: 'c4', tenant_id: 't1', lead_id: null, condo_id: 'cd1', agent_type: 'vision', channel: 'whatsapp',
-    contact_name: 'Portaria Res. Aurora', contact_role: 'Zelador', status: 'alerta', unread: 1,
+    contact_name: 'Portaria Res. Aurora', contact_phone: null, contact_role: 'Zelador', status: 'alerta', unread: 1,
+    archived: false, loss_reason: null, loss_notes: null,
     created_at: '2026-04-11T14:10:00Z', updated_at: '2026-04-11T14:16:00Z',
     messages: [
       { id: 'm17', conversation_id: 'c4', from_type: 'agent', content: '⚠️ Alerta: Azul retirado pelo Apto 712 completou 24h. Cobranca R$30/dia ativada. Ja foi devolvido?', metadata: {}, created_at: '2026-04-11T14:10:00Z' },

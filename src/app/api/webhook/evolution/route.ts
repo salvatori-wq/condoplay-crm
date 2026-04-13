@@ -111,25 +111,36 @@ export async function POST(req: NextRequest) {
         metadata: { source: 'evolution_webhook' },
       });
 
-      // ═══ AUTO-RESPOND VIA LOKI — só se for lead do HAWKEYE ═══
+      // ═══ AUTO-RESPOND VIA LOKI — só se for lead do HAWKEYE e agente NÃO pausado ═══
       if (conversation.lead_id && conversation.agent_type === 'loki') {
-        console.log(`[Webhook] Lead respondeu. Acionando LOKI para conversa ${conversation.id}...`);
-        try {
-          const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3002';
-          // AWAIT the LOKI response to ensure it completes before webhook returns
-          const lokiRes = await fetch(`${appUrl}/api/agents/loki/respond`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'respond',
-              conversationId: conversation.id,
-              incomingMessage: text,
-            }),
-          });
-          const lokiData = await lokiRes.json();
-          console.log('[Webhook] LOKI responded:', lokiData.ok ? 'success' : 'failed');
-        } catch (err) {
-          console.error('[Webhook] Failed to trigger LOKI:', err);
+        // Check if agent is paused
+        const { data: agentCfg } = await supabase
+          .from('agent_config')
+          .select('paused')
+          .eq('agent_type', conversation.agent_type)
+          .eq('tenant_id', DEFAULT_TENANT_ID)
+          .single();
+
+        if (agentCfg?.paused) {
+          console.log(`[Webhook] Agent ${conversation.agent_type} is PAUSED. Skipping auto-respond.`);
+        } else {
+          console.log(`[Webhook] Lead respondeu. Acionando LOKI para conversa ${conversation.id}...`);
+          try {
+            const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3002';
+            const lokiRes = await fetch(`${appUrl}/api/agents/loki/respond`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'respond',
+                conversationId: conversation.id,
+                incomingMessage: text,
+              }),
+            });
+            const lokiData = await lokiRes.json();
+            console.log('[Webhook] LOKI responded:', lokiData.ok ? 'success' : 'failed');
+          } catch (err) {
+            console.error('[Webhook] Failed to trigger LOKI:', err);
+          }
         }
       }
     }

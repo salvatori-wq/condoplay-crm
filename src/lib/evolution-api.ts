@@ -121,12 +121,13 @@ export async function sendTextMessage(phone: string, text: string) {
   const number = phone.replace(/\D/g, '').replace(/^0+/, '');
   const jid = number.includes('55') ? `${number}@s.whatsapp.net` : `55${number}@s.whatsapp.net`;
 
-  // Apply normalization workaround
-  const normalizedText = encodeBaileysWorkaround(text);
+  // Strip diacritics inline (redundant safety — Evolution API discards non-ASCII)
+  const safeText = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  console.log('[sendTextMessage] original:', text.substring(0, 30), '→ safe:', safeText.substring(0, 30));
 
   const payload = {
     number: jid.replace('@s.whatsapp.net', ''),
-    text: normalizedText,
+    text: safeText,
   };
 
   const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${INSTANCE_NAME}`, {
