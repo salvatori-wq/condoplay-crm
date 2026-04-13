@@ -115,13 +115,12 @@ export async function POST(req: NextRequest) {
       if (conversation.lead_id && conversation.agent_type === 'loki') {
         // Check if agent is paused
         const { data: agentCfg } = await supabase
-          .from('agent_config')
-          .select('paused')
-          .eq('agent_type', conversation.agent_type)
-          .eq('tenant_id', DEFAULT_TENANT_ID)
+          .from('AgentConfig')
+          .select('pausado')
+          .eq('tipoAgente', conversation.agent_type)
           .single();
 
-        if (agentCfg?.paused) {
+        if (agentCfg?.pausado) {
           console.log(`[Webhook] Agent ${conversation.agent_type} is PAUSED. Skipping auto-respond.`);
         } else {
           console.log(`[Webhook] Lead respondeu. Acionando LOKI para conversa ${conversation.id}...`);

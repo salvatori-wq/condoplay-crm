@@ -35,18 +35,15 @@ export async function getCondos() {
 // ═══ CONVERSATIONS ═══
 export async function getConversations(opts?: { agentType?: AgentType; archived?: boolean; status?: string }) {
   let query = supabase
-    .from('conversations')
+    .from('WhatsAppConversa')
     .select('*')
-    .order('updated_at', { ascending: false });
+    .order('atualizadoEm', { ascending: false });
 
   // Default: hide archived unless explicitly requested
-  const useArchiveFilter = opts?.archived !== undefined ? true : true;
-  if (useArchiveFilter) {
-    query = query.eq('archived', opts?.archived === true ? true : false);
-  }
+  query = query.eq('arquivada', opts?.archived === true ? true : false);
 
   if (opts?.agentType) {
-    query = query.eq('agent_type', opts.agentType);
+    query = query.eq('tipo', opts.agentType);
   }
   if (opts?.status) {
     query = query.eq('status', opts.status);
@@ -54,39 +51,60 @@ export async function getConversations(opts?: { agentType?: AgentType; archived?
 
   const { data, error } = await query;
 
-  // Fallback: if query fails (e.g. archived column doesn't exist yet), retry without new columns
   if (error) {
+    // Fallback: retry without arquivada filter (column might not exist yet)
     let fallback = supabase
-      .from('conversations')
+      .from('WhatsAppConversa')
       .select('*')
-      .order('updated_at', { ascending: false });
-    if (opts?.agentType) fallback = fallback.eq('agent_type', opts.agentType);
+      .order('atualizadoEm', { ascending: false });
+    if (opts?.agentType) fallback = fallback.eq('tipo', opts.agentType);
     if (opts?.status) fallback = fallback.eq('status', opts.status);
     const { data: fbData, error: fbError } = await fallback;
     if (fbError) throw fbError;
-    return (fbData || []).map(c => ({ archived: false, loss_reason: null, loss_notes: null, contact_phone: null, ...c })) as Conversation[];
+    return (fbData || []).map(c => ({
+      ...c,
+      archived: false, loss_reason: null, loss_notes: null,
+      // Map JARVIS schema to UI expected fields
+      agent_type: c.tipo, contact_name: c.nomeContato, contact_phone: c.telefone,
+      unread: c.naoLidas, updated_at: c.atualizadoEm, created_at: c.criadoEm,
+    })) as unknown as Conversation[];
   }
 
-  return data as Conversation[];
+  // Map JARVIS schema fields to UI expected shape
+  return (data || []).map(c => ({
+    ...c,
+    agent_type: c.tipo, contact_name: c.nomeContato, contact_phone: c.telefone,
+    unread: c.naoLidas, updated_at: c.atualizadoEm, created_at: c.criadoEm,
+    archived: c.arquivada || false, loss_reason: c.motivoPerda, loss_notes: c.notasPerda,
+    lead_id: c.leadId,
+  })) as unknown as Conversation[];
 }
 
 // ═══ AGENT CONFIG (pause status) ═══
 export async function getAgentConfigs() {
   const { data, error } = await supabase
-    .from('agent_config')
+    .from('AgentConfig')
     .select('*');
-  if (error) throw error;
+  if (error) return [] as AgentConfig[];
   return data as AgentConfig[];
 }
 
 export async function getMessages(conversationId: string) {
   const { data, error } = await supabase
-    .from('messages')
+    .from('WhatsAppMensagem')
     .select('*')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true });
+    .eq('conversaId', conversationId)
+    .order('criadoEm', { ascending: true });
   if (error) throw error;
-  return data as Message[];
+  // Map to UI expected shape
+  return (data || []).map(m => ({
+    ...m,
+    conversation_id: m.conversaId,
+    from_type: m.direcao === 'ENVIADA' ? 'agent' : 'contact',
+    content: m.conteudo,
+    created_at: m.criadoEm,
+    metadata: {},
+  })) as unknown as Message[];
 }
 
 // ═══ SEARCH LOGS ═══

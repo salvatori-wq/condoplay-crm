@@ -23,12 +23,11 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL
 
 async function isAgentPaused(agentType: string): Promise<boolean> {
   const { data } = await supabase
-    .from('agent_config')
-    .select('paused')
-    .eq('agent_type', agentType)
-    .eq('tenant_id', DEFAULT_TENANT_ID)
+    .from('AgentConfig')
+    .select('pausado')
+    .eq('tipoAgente', agentType)
     .single();
-  return data?.paused === true;
+  return data?.pausado === true;
 }
 
 export async function POST(req: Request) {

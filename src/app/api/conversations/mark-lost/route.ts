@@ -6,8 +6,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
 
-const DEFAULT_TENANT_ID = 'aaaa0001-0000-0000-0000-000000000001';
-
 export async function POST(req: NextRequest) {
   try {
     const { conversationId, lossReason, lossNotes } = await req.json();
@@ -19,17 +17,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'lossReason required' }, { status: 400 });
     }
 
-    // Update conversation status to perdido
+    // Update conversation status to PERDIDA
     const { data, error } = await supabase
-      .from('conversations')
+      .from('WhatsAppConversa')
       .update({
-        status: 'perdido',
-        loss_reason: lossReason,
-        loss_notes: lossNotes || null,
-        updated_at: new Date().toISOString(),
+        status: 'PERDIDA',
+        motivoPerda: lossReason,
+        notasPerda: lossNotes || null,
+        atualizadoEm: new Date().toISOString(),
       })
       .eq('id', conversationId)
-      .select('id, agent_type, contact_name, loss_reason')
+      .select('id, tipo, nomeContato, motivoPerda')
       .single();
 
     if (error) {
@@ -39,26 +37,32 @@ export async function POST(req: NextRequest) {
 
     // Also update linked lead status if exists
     const { data: convo } = await supabase
-      .from('conversations')
-      .select('lead_id')
+      .from('WhatsAppConversa')
+      .select('leadId')
       .eq('id', conversationId)
       .single();
 
-    if (convo?.lead_id) {
+    if (convo?.leadId) {
       await supabase
-        .from('leads')
-        .update({ status: 'perdido', updated_at: new Date().toISOString() })
-        .eq('id', convo.lead_id);
+        .from('LeadProspectado')
+        .update({ status: 'PERDIDO', atualizadoEm: new Date().toISOString() })
+        .eq('id', convo.leadId);
     }
 
     // Log for training analysis
-    await supabase.from('agent_logs').insert({
-      tenant_id: DEFAULT_TENANT_ID,
-      agent_type: data.agent_type,
-      action: `Conversa perdida: ${data.contact_name} — ${lossReason}`,
-      detail: lossNotes || null,
-      metadata: { conversation_id: conversationId, loss_reason: lossReason, source: 'mark_lost' },
-    });
+    try {
+      await supabase.from('LeadFeedback').insert({
+        leadId: convo?.leadId || null,
+        conversaId: conversationId,
+        tipo: 'PERDA',
+        motivo: lossReason,
+        notas: lossNotes || null,
+        agente: data.tipo,
+        criadoEm: new Date().toISOString(),
+      });
+    } catch {
+      console.log('[MarkLost] LeadFeedback insert skipped');
+    }
 
     return NextResponse.json({ ok: true, conversation: data });
   } catch (err) {
@@ -71,11 +75,11 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   try {
     const { data, error } = await supabase
-      .from('conversations')
-      .select('agent_type, loss_reason, loss_notes, contact_name, updated_at')
-      .eq('status', 'perdido')
-      .not('loss_reason', 'is', null)
-      .order('updated_at', { ascending: false });
+      .from('WhatsAppConversa')
+      .select('tipo, motivoPerda, notasPerda, nomeContato, atualizadoEm')
+      .eq('status', 'PERDIDA')
+      .not('motivoPerda', 'is', null)
+      .order('atualizadoEm', { ascending: false });
 
     if (error) {
       return NextResponse.json({ error: 'query_failed' }, { status: 500 });
@@ -85,10 +89,10 @@ export async function GET() {
     const byReason: Record<string, number> = {};
     const byAgent: Record<string, Record<string, number>> = {};
     for (const row of data || []) {
-      const reason = row.loss_reason || 'unknown';
+      const reason = row.motivoPerda || 'unknown';
       byReason[reason] = (byReason[reason] || 0) + 1;
-      if (!byAgent[row.agent_type]) byAgent[row.agent_type] = {};
-      byAgent[row.agent_type][reason] = (byAgent[row.agent_type][reason] || 0) + 1;
+      if (!byAgent[row.tipo]) byAgent[row.tipo] = {};
+      byAgent[row.tipo][reason] = (byAgent[row.tipo][reason] || 0) + 1;
     }
 
     return NextResponse.json({
