@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react';
 import { Tag } from '@/components/ui/tag';
 import { getCondos } from '@/lib/queries';
+import { AGENTS } from '@/types/database';
+
+const AGENT_COUNT = Object.keys(AGENTS).length;
 
 export function Header() {
   const [mrr, setMrr] = useState(0);
@@ -21,7 +24,7 @@ export function Header() {
         TIBIA Online — {new Date().toLocaleDateString('pt-BR')}
       </div>
       <div className="flex gap-2">
-        <Tag color="#4ade80">7 agentes</Tag>
+        <Tag color="#4ade80">{AGENT_COUNT} agentes</Tag>
         <Tag color="#22d3ee">MRR R${(mrr / 1000).toFixed(1)}k</Tag>
       </div>
     </header>

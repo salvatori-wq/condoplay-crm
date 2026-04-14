@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import type { EvolutionWebhookPayload } from '@/lib/evolution-api';
 import { extractMessageText, extractPhoneFromJid } from '@/lib/evolution-api';
-
-// Use service-level supabase client for webhook (server-side)
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
-
-const DEFAULT_TENANT_ID = 'aaaa0001-0000-0000-0000-000000000001';
+import { supabaseServer as supabase } from '@/lib/supabase-server';
+import { getAppUrl, DEFAULT_TENANT_ID } from '@/lib/env';
 
 export async function POST(req: NextRequest) {
   try {
+    // Validate webhook token if configured
+    const webhookToken = process.env.EVOLUTION_WEBHOOK_TOKEN;
+    if (webhookToken) {
+      const authHeader = req.headers.get('authorization') || req.headers.get('x-webhook-token');
+      if (authHeader !== webhookToken && authHeader !== `Bearer ${webhookToken}`) {
+        console.warn('[Webhook] Unauthorized request — invalid token');
+        return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+      }
+    }
+
     const raw = await req.text();
     let payload: EvolutionWebhookPayload;
     try {
@@ -22,8 +25,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
     }
 
-    // Log EVERY webhook event for debugging
-    console.log(`[Webhook] Event: ${payload.event} | fromMe: ${payload.data?.key?.fromMe} | jid: ${payload.data?.key?.remoteJid} | text: ${payload.data?.message?.conversation?.substring(0, 40) || payload.data?.message?.extendedTextMessage?.text?.substring(0, 40) || '[no text]'}`);
+    console.log(`[Webhook] Event: ${payload.event} | fromMe: ${payload.data?.key?.fromMe} | jid: ${payload.data?.key?.remoteJid}`);
 
     // Only process messages
     if (payload.event !== 'MESSAGES_UPSERT') {
@@ -44,7 +46,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, skipped: 'empty' });
     }
 
-    console.log(`[Webhook] ${isFromMe ? '→ SENT' : '← RECEIVED'} ${phone} - ${contactName}: ${text.substring(0, 50)}`);
+    console.log(`[Webhook] ${isFromMe ? 'SENT' : 'RECEIVED'} ${phone}: ${text.substring(0, 50)}`);
 
     // Find or create conversation for this phone number
     let conversation;
@@ -56,17 +58,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (!conversation) {
-      try {
-        conversation = await createConversation(phone, contactName);
-      } catch (createErr) {
-        console.error('[Webhook] Error creating conversation:', createErr);
-        throw createErr;
-      }
+      conversation = await createConversation(phone, contactName);
     }
 
-    console.log('[Webhook] Conversation:', conversation.id);
-
-    // Insert message — from_type depends on direction
+    // Insert message
     const { error: msgError } = await supabase.from('messages').insert({
       conversation_id: conversation.id,
       from_type: isFromMe ? 'agent' : 'contact',
@@ -81,8 +76,8 @@ export async function POST(req: NextRequest) {
     });
 
     if (msgError) {
-      console.error('Error inserting message:', msgError);
-      return NextResponse.json({ error: 'insert_failed' }, { status: 500 });
+      console.error('[Webhook] Error inserting message:', msgError.message);
+      return NextResponse.json({ error: 'insert_failed', detail: msgError.message }, { status: 500 });
     }
 
     // Update conversation
@@ -91,19 +86,23 @@ export async function POST(req: NextRequest) {
       status: 'ativo',
     };
 
-    // Only bump unread for incoming messages
     if (!isFromMe) {
       updateData.unread = (conversation.unread || 0) + 1;
     }
 
-    await supabase
+    const { error: updateErr } = await supabase
       .from('conversations')
       .update(updateData)
       .eq('id', conversation.id);
 
-    // Log in agent_logs (only for incoming — avoid noise from outgoing)
+    if (updateErr) {
+      console.error('[Webhook] Error updating conversation:', updateErr.message);
+    }
+
+    // Log + auto-respond (only for incoming)
     if (!isFromMe) {
-      await supabase.from('agent_logs').insert({
+      // Log to agent_logs
+      const { error: logErr } = await supabase.from('agent_logs').insert({
         tenant_id: DEFAULT_TENANT_ID,
         agent_type: conversation.agent_type || 'jarvis',
         action: `WhatsApp de ${contactName}: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`,
@@ -111,9 +110,12 @@ export async function POST(req: NextRequest) {
         metadata: { source: 'evolution_webhook' },
       });
 
-      // ═══ AUTO-RESPOND VIA LOKI — só se for lead do HAWKEYE e agente NÃO pausado ═══
+      if (logErr) {
+        console.error('[Webhook] Error logging:', logErr.message);
+      }
+
+      // ═══ AUTO-RESPOND VIA LOKI ═══
       if (conversation.lead_id && conversation.agent_type === 'loki') {
-        // Check if agent is paused
         const { data: agentCfg } = await supabase
           .from('AgentConfig')
           .select('pausado')
@@ -123,9 +125,9 @@ export async function POST(req: NextRequest) {
         if (agentCfg?.pausado) {
           console.log(`[Webhook] Agent ${conversation.agent_type} is PAUSED. Skipping auto-respond.`);
         } else {
-          console.log(`[Webhook] Lead respondeu. Acionando LOKI para conversa ${conversation.id}...`);
+          console.log(`[Webhook] Triggering LOKI for conversation ${conversation.id}...`);
           try {
-            const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3002';
+            const appUrl = getAppUrl();
             const lokiRes = await fetch(`${appUrl}/api/agents/loki/respond`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -135,10 +137,16 @@ export async function POST(req: NextRequest) {
                 incomingMessage: text,
               }),
             });
-            const lokiData = await lokiRes.json();
-            console.log('[Webhook] LOKI responded:', lokiData.ok ? 'success' : 'failed');
+
+            if (!lokiRes.ok) {
+              const errBody = await lokiRes.text().catch(() => '');
+              console.error(`[Webhook] LOKI responded with ${lokiRes.status}: ${errBody.substring(0, 200)}`);
+            } else {
+              const lokiData = await lokiRes.json();
+              console.log('[Webhook] LOKI responded:', lokiData.ok ? 'success' : 'failed');
+            }
           } catch (err) {
-            console.error('[Webhook] Failed to trigger LOKI:', err);
+            console.error('[Webhook] Failed to trigger LOKI:', err instanceof Error ? err.message : err);
           }
         }
       }
@@ -147,7 +155,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, conversation_id: conversation.id, direction: isFromMe ? 'sent' : 'received' });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : JSON.stringify(err);
-    console.error('Webhook error:', errorMsg);
+    console.error('[Webhook] Fatal error:', errorMsg);
     return NextResponse.json({ error: 'webhook_error', message: errorMsg }, { status: 500 });
   }
 }
@@ -155,15 +163,13 @@ export async function POST(req: NextRequest) {
 // ═══ HELPERS ═══
 
 async function findConversation(phone: string) {
-  // Normalize: try with and without country code
   const phoneVariants = [phone];
   if (phone.startsWith('55') && phone.length > 10) {
-    phoneVariants.push(phone.substring(2)); // without country code
+    phoneVariants.push(phone.substring(2));
   } else {
-    phoneVariants.push(`55${phone}`); // with country code
+    phoneVariants.push(`55${phone}`);
   }
 
-  // Search conversations by phone stored in metadata
   for (const p of phoneVariants) {
     const { data } = await supabase
       .from('conversations')
@@ -198,11 +204,10 @@ async function findConversation(phone: string) {
 }
 
 async function createConversation(phone: string, contactName: string) {
-  // Check if this phone belongs to an existing lead
   const { data: leads } = await supabase
     .from('leads')
     .select('id, name, role')
-    .or(`phone.eq.${phone},phone.eq.+55${phone},phone.eq.55${phone}`)
+    .or(`phone.eq.${phone},phone.eq.55${phone}`)
     .limit(1);
 
   const lead = leads?.[0] || null;
@@ -213,7 +218,7 @@ async function createConversation(phone: string, contactName: string) {
       tenant_id: DEFAULT_TENANT_ID,
       lead_id: lead?.id || null,
       condo_id: null,
-      agent_type: lead ? 'loki' : 'jarvis', // Sales if lead, support otherwise
+      agent_type: lead ? 'loki' : 'jarvis',
       channel: 'whatsapp',
       contact_name: lead?.name || contactName,
       contact_phone: phone,

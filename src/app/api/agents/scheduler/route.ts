@@ -1,28 +1,18 @@
-// ═══ SCHEDULER — Orchestrador de Agentes Autônomos ═══
-// Cron diário (08:00 BRT / 11:00 UTC, seg-sáb).
-// Executa TUDO em sequência:
-//   1. HAWKEYE: prospecção diária (10 leads)
+// ═══ SCHEDULER — Orchestrador de Agentes Autonomos ═══
+// Cron diario (08:00 BRT / 11:00 UTC, seg-sab).
+// Executa TUDO em sequencia:
+//   1. HAWKEYE: prospeccao diaria (10 leads)
 //   2. LOKI batch_contacts: contato inicial com leads novos
 //   3. LOKI batch_followups: FUPs (max 3 dias, depois 'perdido')
 //
-// Respostas 24/7 são feitas pelo webhook (não depende do cron).
+// Respostas 24/7 sao feitas pelo webhook (nao depende do cron).
 
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
-
-const DEFAULT_TENANT_ID = 'aaaa0001-0000-0000-0000-000000000001';
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : 'http://localhost:3002';
+import { supabaseServer } from '@/lib/supabase-server';
+import { getAppUrl, DEFAULT_TENANT_ID } from '@/lib/env';
 
 async function isAgentPaused(agentType: string): Promise<boolean> {
-  const { data } = await supabase
+  const { data } = await supabaseServer
     .from('AgentConfig')
     .select('pausado')
     .eq('tipoAgente', agentType)
@@ -38,9 +28,10 @@ export async function POST(req: Request) {
   const actions: string[] = [];
   const results: Record<string, unknown> = {};
   const skipped: string[] = [];
+  const errors: string[] = [];
 
   try {
-    // ═══ STEP 1: HAWKEYE prospecção (10 leads/dia) ═══
+    // ═══ STEP 1: HAWKEYE prospeccao (10 leads/dia) ═══
     if (await isAgentPaused('hawkeye')) {
       console.log('[Scheduler] HAWKEYE is PAUSED. Skipping.');
       skipped.push('hawkeye');
@@ -49,6 +40,7 @@ export async function POST(req: Request) {
       const hawkeyeRes = await callAgent('hawkeye/run', 'POST');
       results.hawkeye = hawkeyeRes;
       actions.push('hawkeye');
+      if (hawkeyeRes.error) errors.push(`hawkeye: ${hawkeyeRes.error}`);
     }
 
     // Espera 5s para leads serem inseridos no DB
@@ -66,6 +58,7 @@ export async function POST(req: Request) {
       });
       results.loki_batch = lokiRes;
       actions.push('loki_batch');
+      if (lokiRes.error) errors.push(`loki_batch: ${lokiRes.error}`);
 
       // ═══ STEP 3: LOKI batch_followups (FUPs pendentes) ═══
       console.log('[Scheduler] Step 3: LOKI followups...');
@@ -74,20 +67,26 @@ export async function POST(req: Request) {
       });
       results.loki_fup = fupRes;
       actions.push('loki_followups');
+      if (fupRes.error) errors.push(`loki_fup: ${fupRes.error}`);
     }
 
+    // Log run summary
+    await logSchedulerRun(actions, skipped, errors);
+
+    const ok = errors.length === 0;
     return NextResponse.json({
-      ok: true,
+      ok,
       actions,
       skipped,
+      errors: errors.length > 0 ? errors : undefined,
       results,
       time: now.toISOString(),
       hour,
       dayOfWeek,
-    });
+    }, { status: ok ? 200 : 207 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('[Scheduler] Error:', msg);
+    console.error('[Scheduler] Fatal error:', msg, err instanceof Error ? err.stack : '');
     return NextResponse.json({ ok: false, error: msg, actions, results }, { status: 500 });
   }
 }
@@ -112,8 +111,8 @@ export async function GET(req: Request) {
       day: now.getDay(),
       is_business_day: now.getDay() !== 0,
       schedule: {
-        cron: '08:00 BRT (seg-sáb)',
-        step_1: 'HAWKEYE prospecção (10 leads)',
+        cron: '08:00 BRT (seg-sab)',
+        step_1: 'HAWKEYE prospeccao (10 leads)',
         step_2: 'LOKI batch_contacts (contato inicial)',
         step_3: 'LOKI batch_followups (FUPs max 3 dias)',
         webhook: 'Respostas 24/7 (auto via Evolution API)',
@@ -121,9 +120,7 @@ export async function GET(req: Request) {
     });
   }
 
-  // Force-run specific agent or all
   if (force === 'all') {
-    // Simulate full daily run
     const fakeReq = new Request(url.toString(), { method: 'POST' });
     return POST(fakeReq);
   }
@@ -143,15 +140,13 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: `Unknown agent: ${force}` }, { status: 400 });
   }
 
-  return NextResponse.json({ ok: true, forced: force, result });
+  return NextResponse.json({ ok: !result.error, forced: force, result });
 }
 
 // ═══ HELPERS ═══
 
-async function callAgent(path: string, method: string, body?: unknown): Promise<unknown> {
-  const baseUrl = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3002');
+async function callAgent(path: string, method: string, body?: unknown): Promise<Record<string, unknown>> {
+  const baseUrl = getAppUrl();
 
   try {
     const res = await fetch(`${baseUrl}/api/agents/${path}`, {
@@ -160,10 +155,35 @@ async function callAgent(path: string, method: string, body?: unknown): Promise<
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    return await res.json();
+    const data = await res.json();
+
+    if (!res.ok) {
+      const errorMsg = data?.error || `HTTP ${res.status}`;
+      console.error(`[Scheduler] callAgent(${path}) failed: ${errorMsg}`);
+      return { error: errorMsg, status: res.status, ...data };
+    }
+
+    return data;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { error: msg };
+    console.error(`[Scheduler] callAgent(${path}) network error: ${msg}`);
+    return { error: `Network error: ${msg}` };
+  }
+}
+
+async function logSchedulerRun(actions: string[], skipped: string[], errors: string[]) {
+  try {
+    await supabaseServer.from('agent_logs').insert({
+      tenant_id: DEFAULT_TENANT_ID,
+      agent_type: 'tibia',
+      action: errors.length > 0
+        ? `Scheduler com erros: ${errors.join(', ')}`
+        : `Scheduler OK: ${actions.join(', ')}`,
+      detail: JSON.stringify({ actions, skipped, errors }),
+      metadata: { source: 'scheduler_cron' },
+    });
+  } catch (err) {
+    console.error('[Scheduler] Failed to log run:', err instanceof Error ? err.message : err);
   }
 }
 

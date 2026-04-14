@@ -1,24 +1,47 @@
 // ═══ EVOLUTION API CLIENT — WhatsApp Integration ═══
 
-const EVOLUTION_API_URL = process.env.NEXT_PUBLIC_EVOLUTION_API_URL || '';
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
-const INSTANCE_NAME = process.env.NEXT_PUBLIC_EVOLUTION_INSTANCE || 'condoplay';
+import { getEvolutionConfig } from './env';
+
+function getConfig() {
+  return getEvolutionConfig();
+}
 
 function headers() {
+  const { apiKey } = getConfig();
   return {
     'Content-Type': 'application/json; charset=utf-8',
-    apikey: EVOLUTION_API_KEY,
+    apikey: apiKey,
   };
+}
+
+function instanceUrl(path: string): string {
+  const { url, instance } = getConfig();
+  return `${url}/${path}/${instance}`;
+}
+
+function baseUrl(path: string): string {
+  const { url } = getConfig();
+  return `${url}/${path}`;
+}
+
+async function checkedFetch(url: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Evolution API ${res.status}: ${res.statusText} — ${body.substring(0, 200)}`);
+  }
+  return res;
 }
 
 // ═══ INSTANCE MANAGEMENT ═══
 
 export async function createInstance() {
-  const res = await fetch(`${EVOLUTION_API_URL}/instance/create`, {
+  const { url, instance } = getConfig();
+  const res = await checkedFetch(`${url}/instance/create`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
-      instanceName: INSTANCE_NAME,
+      instanceName: instance,
       integration: 'WHATSAPP-BAILEYS',
       qrcode: true,
       rejectCall: true,
@@ -33,34 +56,25 @@ export async function createInstance() {
       ],
     }),
   });
-  if (!res.ok) {
-    throw new Error(`Evolution API error: ${res.status} ${res.statusText}`);
-  }
   return res.json();
 }
 
 export async function getInstanceStatus() {
-  const res = await fetch(`${EVOLUTION_API_URL}/instance/connectionState/${INSTANCE_NAME}`, {
+  const res = await checkedFetch(instanceUrl('instance/connectionState'), {
     headers: headers(),
   });
-  if (!res.ok) {
-    throw new Error(`Evolution API error: ${res.status} ${res.statusText}`);
-  }
   return res.json();
 }
 
 export async function getQrCode() {
-  const res = await fetch(`${EVOLUTION_API_URL}/instance/connect/${INSTANCE_NAME}`, {
+  const res = await checkedFetch(instanceUrl('instance/connect'), {
     headers: headers(),
   });
-  if (!res.ok) {
-    throw new Error(`Evolution API error: ${res.status} ${res.statusText}`);
-  }
   return res.json();
 }
 
 export async function restartInstance() {
-  const res = await fetch(`${EVOLUTION_API_URL}/instance/restart/${INSTANCE_NAME}`, {
+  const res = await checkedFetch(instanceUrl('instance/restart'), {
     method: 'PUT',
     headers: headers(),
   });
@@ -68,7 +82,7 @@ export async function restartInstance() {
 }
 
 export async function logoutInstance() {
-  const res = await fetch(`${EVOLUTION_API_URL}/instance/logout/${INSTANCE_NAME}`, {
+  const res = await checkedFetch(instanceUrl('instance/logout'), {
     method: 'DELETE',
     headers: headers(),
   });
@@ -76,7 +90,8 @@ export async function logoutInstance() {
 }
 
 export async function setWebhook(webhookUrl: string) {
-  const res = await fetch(`${EVOLUTION_API_URL}/webhook/set/${INSTANCE_NAME}`, {
+  const { url, instance } = getConfig();
+  const res = await checkedFetch(`${url}/webhook/set/${instance}`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
@@ -92,63 +107,46 @@ export async function setWebhook(webhookUrl: string) {
       },
     }),
   });
-  if (!res.ok) {
-    throw new Error(`Evolution API error: ${res.status} ${res.statusText}`);
-  }
   return res.json();
 }
 
 // ═══ ENCODING WORKAROUND FOR EVOLUTION API UTF-8 BUG ═══
 // Evolution API infrastructure (nginx/Docker) discards non-ASCII bytes
 // Solution: Strip diacritics, keeping text readable in Portuguese
-// TODO: If Evolution API infra is fixed (nginx charset utf-8 + Docker LANG=C.UTF-8),
-//       remove this workaround and return text as-is
+// TODO: If Evolution API infra is fixed, remove this workaround
 
-function encodeBaileysWorkaround(text: string): string {
-  // Step 1: Decompose characters (NFD separates base + combining marks)
-  // "João" → "J" + "o" + "a" + combining_tilde + "o"
-  const decomposed = text.normalize('NFD');
-
-  // Step 2: Remove combining diacritical marks (accents, tildes, cedillas)
-  // "João" → "Joao", "São" → "Sao", "área" → "area"
-  return decomposed.replace(/[\u0300-\u036f]/g, '');
+function stripDiacritics(text: string): string {
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
 // ═══ MESSAGING ═══
 
 export async function sendTextMessage(phone: string, text: string) {
-  // Normalize phone: remove non-digits, ensure country code
-  const number = phone.replace(/\D/g, '').replace(/^0+/, '');
-  const jid = number.includes('55') ? `${number}@s.whatsapp.net` : `55${number}@s.whatsapp.net`;
+  const number = normalizePhone(phone);
+  const safeText = stripDiacritics(text);
 
-  // Strip diacritics inline (redundant safety — Evolution API discards non-ASCII)
-  const safeText = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  console.log('[sendTextMessage] original:', text.substring(0, 30), '→ safe:', safeText.substring(0, 30));
-
-  const payload = {
-    number: jid.replace('@s.whatsapp.net', ''),
-    text: safeText,
-  };
-
-  const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${INSTANCE_NAME}`, {
+  const res = await checkedFetch(instanceUrl('message/sendText'), {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      number,
+      text: safeText,
+    }),
   });
   return res.json();
 }
 
 export async function sendMediaMessage(phone: string, mediaUrl: string, caption?: string, mediatype: 'image' | 'video' | 'document' = 'image') {
-  const number = phone.replace(/\D/g, '').replace(/^0+/, '');
+  const number = normalizePhone(phone);
 
-  const res = await fetch(`${EVOLUTION_API_URL}/message/sendMedia/${INSTANCE_NAME}`, {
+  const res = await checkedFetch(instanceUrl('message/sendMedia'), {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
-      number: number.includes('55') ? number : `55${number}`,
+      number,
       mediatype,
       media: mediaUrl,
-      caption: caption || '',
+      caption: caption ? stripDiacritics(caption) : '',
     }),
   });
   return res.json();
@@ -157,16 +155,26 @@ export async function sendMediaMessage(phone: string, mediaUrl: string, caption?
 // ═══ CONTACT UTILS ═══
 
 export async function checkNumberExists(phone: string) {
-  const number = phone.replace(/\D/g, '').replace(/^0+/, '');
+  const number = normalizePhone(phone);
 
-  const res = await fetch(`${EVOLUTION_API_URL}/chat/whatsappNumbers/${INSTANCE_NAME}`, {
+  const res = await checkedFetch(instanceUrl('chat/whatsappNumbers'), {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
-      numbers: [number.includes('55') ? number : `55${number}`],
+      numbers: [number],
     }),
   });
   return res.json();
+}
+
+// ═══ PHONE NORMALIZATION ═══
+
+function normalizePhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '').replace(/^0+/, '');
+  if (!digits || digits.length < 8) {
+    throw new Error(`Invalid phone number: ${phone}`);
+  }
+  return digits.startsWith('55') ? digits : `55${digits}`;
 }
 
 // ═══ TYPES ═══

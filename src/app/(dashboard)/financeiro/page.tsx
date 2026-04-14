@@ -1,27 +1,49 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { KpiCard } from '@/components/ui/kpi-card';
 import { Tag } from '@/components/ui/tag';
+import { LoadingState, EmptyState, ErrorState } from '@/components/ui/loading-state';
 import { getInvoices, getCondos, getSearchLogs } from '@/lib/queries';
 import type { Invoice, Condo, SearchLog } from '@/types/database';
+
+function getCurrentMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatMonthLabel(month: string): string {
+  const [y, m] = month.split('-');
+  const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  return `${months[parseInt(m, 10) - 1]}/${y.slice(2)}`;
+}
 
 export default function FinanceiroPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [condos, setCondos] = useState<Condo[]>([]);
   const [searchLogs, setSearchLogs] = useState<SearchLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadData = useCallback(() => {
+    setLoading(true);
+    setError(null);
     Promise.all([getInvoices(), getCondos(), getSearchLogs()])
       .then(([inv, c, sl]) => { setInvoices(inv); setCondos(c); setSearchLogs(sl); })
-      .catch(console.error);
+      .catch(err => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLoading(false));
   }, []);
 
-  if (invoices.length === 0) return <div className="text-[#475569] text-sm animate-pulse">Carregando financeiro...</div>;
+  useEffect(() => { loadData(); }, [loadData]);
 
+  if (loading) return <LoadingState label="financeiro" />;
+  if (error) return <ErrorState message={error} onRetry={loadData} />;
+  if (invoices.length === 0) return <EmptyState label="financeiro" />;
+
+  const currentMonth = getCurrentMonth();
   const mrr = condos.filter(c => c.status === 'ativo').reduce((s, c) => s + Number(c.monthly_plan), 0);
-  const currentInvoices = invoices.filter(i => i.month === '2026-04');
+  const currentInvoices = invoices.filter(i => i.month === currentMonth);
   const totalTaxas = currentInvoices.reduce((s, i) => s + Number(i.extra_fees), 0);
   const totalCostProsp = searchLogs.reduce((s, h) => s + Number(h.cost), 0);
 
@@ -39,7 +61,7 @@ export default function FinanceiroPage() {
       </div>
 
       <Card>
-        <div className="text-xs font-bold mb-3 text-[#4ade80]">💎 STARK — Fechamento Mensal (Abr/26)</div>
+        <div className="text-xs font-bold mb-3 text-[#4ade80]">STARK — Fechamento Mensal ({formatMonthLabel(currentMonth)})</div>
         <table className="w-full border-collapse text-[11px]">
           <thead>
             <tr>
@@ -53,11 +75,11 @@ export default function FinanceiroPage() {
               const condo = condos.find(c => c.id === inv.condo_id);
               return (
                 <tr key={inv.id}>
-                  <td className="p-2 font-semibold">{condo?.name}</td>
+                  <td className="p-2 font-semibold">{condo?.name || '—'}</td>
                   <td className="p-2 text-[#4ade80]">R${Number(inv.plan_amount).toLocaleString()}</td>
                   <td className="p-2" style={{ color: Number(inv.extra_fees) > 0 ? '#fbbf24' : '#4ade80' }}>R${Number(inv.extra_fees)}</td>
                   <td className="p-2 text-[#22d3ee] font-bold">R${Number(inv.total).toLocaleString()}</td>
-                  <td className="p-2"><Tag color={inv.status === 'pago' ? '#4ade80' : '#fbbf24'}>{inv.status === 'pago' ? 'Pago ✅' : inv.status}</Tag></td>
+                  <td className="p-2"><Tag color={inv.status === 'pago' ? '#4ade80' : '#fbbf24'}>{inv.status === 'pago' ? 'Pago' : inv.status}</Tag></td>
                 </tr>
               );
             })}
@@ -67,7 +89,7 @@ export default function FinanceiroPage() {
 
       {/* History */}
       <Card className="mt-3">
-        <div className="text-xs font-bold mb-3 text-[#a78bfa]">📊 Historico</div>
+        <div className="text-xs font-bold mb-3 text-[#a78bfa]">Historico</div>
         <table className="w-full border-collapse text-[11px]">
           <thead>
             <tr>
@@ -77,12 +99,12 @@ export default function FinanceiroPage() {
             </tr>
           </thead>
           <tbody>
-            {invoices.filter(i => i.month !== '2026-04').map(inv => {
+            {invoices.filter(i => i.month !== currentMonth).map(inv => {
               const condo = condos.find(c => c.id === inv.condo_id);
               return (
                 <tr key={inv.id}>
                   <td className="p-2 text-[#94a3b8]">{inv.month}</td>
-                  <td className="p-2 font-semibold">{condo?.name}</td>
+                  <td className="p-2 font-semibold">{condo?.name || '—'}</td>
                   <td className="p-2 text-[#22d3ee] font-bold">R${Number(inv.total).toLocaleString()}</td>
                   <td className="p-2"><Tag color="#4ade80">{inv.status}</Tag></td>
                 </tr>

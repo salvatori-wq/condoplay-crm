@@ -6,16 +6,10 @@
 // Multi-LLM com failover: Groq(Llama) → Gemini → Claude.
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { callLLM, getAvailableProviders } from '@/lib/multi-llm';
 import { sendTextMessage } from '@/lib/evolution-api';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
-
-const DEFAULT_TENANT_ID = 'aaaa0001-0000-0000-0000-000000000001';
+import { supabaseServer as supabase } from '@/lib/supabase-server';
+import { DEFAULT_TENANT_ID } from '@/lib/env';
 
 // ═══ SYSTEM PROMPT DO LOKI ═══
 const LOKI_SYSTEM_PROMPT = `Voce e Joao Salvatori, Diretor Comercial da Condo Play.
@@ -656,9 +650,9 @@ async function handleScheduleMeeting(body: {
     return NextResponse.json({ error: 'Not a HAWKEYE lead.' }, { status: 403 });
   }
 
-  const { scheduleMetodoing } = await import('@/lib/loki-calendar');
+  const { scheduleMeeting } = await import('@/lib/loki-calendar');
 
-  const result = await scheduleMetodoing({
+  const result = await scheduleMeeting({
     conversationId,
     leadId: convo.lead_id,
     contactName: convo.contact_name,

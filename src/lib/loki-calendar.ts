@@ -1,16 +1,9 @@
-// ═══ LOKI × GOOGLE CALENDAR — Agendamento de Reuniões ═══
-// Integra LOKI com Google Calendar para marcar reuniões com síndicos.
-// Horários: 12-13h ou 18h+, seg-sáb
+// ═══ LOKI x GOOGLE CALENDAR — Agendamento de Reunioes ═══
+// Integra LOKI com Google Calendar para marcar reunioes com sindicos.
+// Horarios: 12-13h ou 18h+, seg-sab
 
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
-
-const SALVATORI_EMAIL = 'salvatori@washme.com.br';
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3002';
+import { supabaseServer } from './supabase-server';
+import { DEFAULT_TENANT_ID } from './env';
 
 export interface MeetingRequest {
   conversationId: string;
@@ -23,52 +16,26 @@ export interface MeetingRequest {
   isVideo?: boolean; // true = Google Meet, false = presencial
 }
 
-// ═══ AGENDAR REUNIÃO (chamado pelo LOKI ao confirmar) ═══
+// ═══ AGENDAR REUNIAO (chamado pelo LOKI ao confirmar) ═══
 
-export async function scheduleMetodoing(req: MeetingRequest) {
+export async function scheduleMeeting(req: MeetingRequest) {
   const { conversationId, leadId, contactName, contactEmail, contactPhone, preferredTime, isVideo } = req;
 
-  // Validar horário
   let hour: number;
   if (preferredTime === 'noon') {
-    hour = 12; // 12:00-13:00
+    hour = 12;
   } else if (preferredTime === 'evening') {
-    hour = 18; // 18:00+
+    hour = 18;
   } else {
-    hour = 12; // default
+    hour = 12;
   }
 
-  // Gerar link Google Meet se for video
-  let meetLink: string | null = null;
-  if (isVideo) {
-    meetLink = `https://meet.google.com/new`; // Em produção, criar via Google API
-  }
-
-  // Montar email para confirmação
-  const emailSubject = `Reunião agendada: ${contactName} - Condo Play`;
-  const emailBody = `
-Olá João,
-
-Reunião agendada com ${contactName} (${contactPhone}):
-
-Data: ${req.preferredDate || 'A confirmar'}
-Horário: ${preferredTime === 'noon' ? '12h-13h' : '18h+'}
-Formato: ${isVideo ? 'Google Meet' : 'Presencial'}
-${isVideo ? `Link: ${meetLink}` : ''}
-
-Contato do síndico: ${contactEmail}
-
-Attendees:
-- João Salvatori <salvatori@washme.com.br>
-- ${contactName} <${contactEmail}>
-
---
-Condo Play
-Trazendo jogos para condomínios
-  `;
+  // TODO: Integrar com Google Calendar API para criar evento real
+  // Por enquanto, apenas registra no CRM
+  const meetLink = isVideo ? 'https://meet.google.com/new' : null;
 
   // Salvar no CRM
-  await supabase
+  const { error: leadErr } = await supabaseServer
     .from('leads')
     .update({
       status: 'reuniao_agendada',
@@ -83,8 +50,12 @@ Trazendo jogos para condomínios
     })
     .eq('id', leadId);
 
+  if (leadErr) {
+    console.error('[LokiCalendar] Failed to update lead:', leadErr.message);
+  }
+
   // Atualizar conversation
-  await supabase
+  const { error: convoErr } = await supabaseServer
     .from('conversations')
     .update({
       status: 'reuniao_agendada',
@@ -92,12 +63,16 @@ Trazendo jogos para condomínios
     })
     .eq('id', conversationId);
 
-  // Log (tolerante a agent_logs não existir)
+  if (convoErr) {
+    console.error('[LokiCalendar] Failed to update conversation:', convoErr.message);
+  }
+
+  // Log
   try {
-    await supabase.from('agent_logs').insert({
-      tenant_id: 'aaaa0001-0000-0000-0000-000000000001',
+    await supabaseServer.from('agent_logs').insert({
+      tenant_id: DEFAULT_TENANT_ID,
       agent_type: 'loki',
-      action: `Reunião agendada: ${contactName} às ${hour}h`,
+      action: `Reuniao agendada: ${contactName} as ${hour}h`,
       detail: JSON.stringify({
         conversation_id: conversationId,
         lead_id: leadId,
@@ -106,8 +81,8 @@ Trazendo jogos para condomínios
       }),
       metadata: { source: 'loki_schedule_meeting' },
     });
-  } catch {
-    // agent_logs may not exist
+  } catch (err) {
+    console.error('[LokiCalendar] Failed to log meeting:', err instanceof Error ? err.message : err);
   }
 
   return {
@@ -120,16 +95,10 @@ Trazendo jogos para condomínios
       type: isVideo ? 'Google Meet' : 'Presencial',
       meetLink,
     },
-    emailTemplate: {
-      to: SALVATORI_EMAIL,
-      cc: contactEmail,
-      subject: emailSubject,
-      body: emailBody,
-    },
   };
 }
 
-// ═══ HELPER: Detectar se síndico forneceu email ═══
+// ═══ HELPER: Detectar se sindico forneceu email ═══
 
 export function extractEmailFromMessage(text: string): string | null {
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
@@ -137,17 +106,15 @@ export function extractEmailFromMessage(text: string): string | null {
   return match ? match[0].toLowerCase() : null;
 }
 
-// ═══ HELPER: Extrair horário preferido da mensagem ═══
+// ═══ HELPER: Extrair horario preferido da mensagem ═══
 
 export function extractPreferredTime(text: string): 'noon' | 'evening' | null {
   const lower = text.toLowerCase();
 
-  // Detectar 12-13h
-  if (lower.includes('12') || lower.includes('almoço') || lower.includes('medio')) {
+  if (lower.includes('12') || lower.includes('almoco') || lower.includes('medio')) {
     return 'noon';
   }
 
-  // Detectar 18h+
   if (lower.includes('18') || lower.includes('noite') || lower.includes('depois') || lower.includes('final')) {
     return 'evening';
   }
@@ -155,11 +122,9 @@ export function extractPreferredTime(text: string): 'noon' | 'evening' | null {
   return null;
 }
 
-// ═══ MESSAGE: Solicitar Email ═══
+// ═══ MESSAGES (sem emojis — comunicacao profissional) ═══
 
-export const ASK_EMAIL_MESSAGE = `Para confirmar a reunião, preciso do seu email profissional. Qual é?`;
-
-// ═══ MESSAGE: Confirmação Agendada ═══
+export const ASK_EMAIL_MESSAGE = `Para confirmar a reuniao, preciso do seu email profissional. Qual e?`;
 
 export function getMeetingConfirmationMessage(
   date: string,
@@ -167,13 +132,18 @@ export function getMeetingConfirmationMessage(
   isVideo: boolean,
   meetLink?: string
 ) {
-  return `Perfeito! 🎉 Reunião confirmada:
-
-📅 ${date}
-🕐 ${time === 'noon' ? '12h-13h' : '18h+'}
-${isVideo ? `📹 Google Meet: ${meetLink || 'Link será enviado'}` : '📍 Presencial'}
-
-Você receberá um email de confirmação em breve. Qualquer dúvida, é só mandar um WhatsApp!
-
-Até lá! 👋`;
+  const lines = [
+    `Perfeito! Reuniao confirmada:`,
+    ``,
+    `Data: ${date}`,
+    `Horario: ${time === 'noon' ? '12h-13h' : '18h+'}`,
+    isVideo
+      ? `Formato: Google Meet${meetLink ? ` — ${meetLink}` : ' (link sera enviado)'}`
+      : `Formato: Presencial`,
+    ``,
+    `Voce recebera um email de confirmacao em breve. Qualquer duvida, e so mandar um WhatsApp!`,
+    ``,
+    `Ate la!`,
+  ];
+  return lines.join('\n');
 }

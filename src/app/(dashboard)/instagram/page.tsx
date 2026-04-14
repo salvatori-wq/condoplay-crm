@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Tag } from '@/components/ui/tag';
+import { LoadingState, EmptyState, ErrorState } from '@/components/ui/loading-state';
 import { getContentCalendar } from '@/lib/queries';
 import type { ContentCalendar } from '@/types/database';
 
@@ -13,20 +14,41 @@ const THEMES: Record<string, string> = {
   'Historia Condo Play': '#f472b6',
 };
 const TYPE_ICONS: Record<string, string> = {
-  carrossel: '🎠',
-  post: '📝',
-  reels: '🎬',
-  story: '📱',
+  carrossel: '>>',
+  post: 'P',
+  reels: 'R',
+  story: 'S',
 };
+
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(year, month + 1, 0).getDate();
+}
 
 export default function InstagramPage() {
   const [calendar, setCalendar] = useState<ContentCalendar[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    getContentCalendar().then(setCalendar).catch(console.error);
+  const loadData = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    getContentCalendar()
+      .then(setCalendar)
+      .catch(err => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLoading(false));
   }, []);
 
-  if (calendar.length === 0) return <div className="text-[#475569] text-sm animate-pulse">Carregando calendario...</div>;
+  useEffect(() => { loadData(); }, [loadData]);
+
+  if (loading) return <LoadingState label="calendario" />;
+  if (error) return <ErrorState message={error} onRetry={loadData} />;
+  if (calendar.length === 0) return <EmptyState label="calendario" />;
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const daysInMonth = getDaysInMonth(year, month);
+  const monthLabel = now.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
   const upcoming = calendar.filter(c => !c.published);
   const published = calendar.filter(c => c.published);
@@ -34,9 +56,9 @@ export default function InstagramPage() {
   return (
     <div>
       <Card className="mb-4 border-l-[3px] border-l-[#fb923c]">
-        <div className="text-xs font-bold text-[#fb923c] mb-1">⚡ STORM — Calendario Instagram</div>
+        <div className="text-xs font-bold text-[#fb923c] mb-1">STORM — Calendario Instagram ({monthLabel})</div>
         <div className="text-[10px] text-[#64748b]">
-          Seg: Automacao · Qua: Jogo da Semana · Sex: Historia Condo Play
+          Seg: Automacao - Qua: Jogo da Semana - Sex: Historia Condo Play
         </div>
       </Card>
 
@@ -45,14 +67,14 @@ export default function InstagramPage() {
         {DAYS.map(d => (
           <div key={d} className="text-center text-[9px] text-[#475569] font-bold py-1">{d}</div>
         ))}
-        {Array.from({ length: 30 }, (_, i) => {
+        {Array.from({ length: daysInMonth }, (_, i) => {
           const day = i + 1;
-          const date = new Date(2026, 3, day);
+          const date = new Date(year, month, day);
           const dow = date.getDay();
           const items = calendar.filter(c => {
             if (!c.scheduled_at) return false;
             const d = new Date(c.scheduled_at);
-            return d.getDate() === day && d.getMonth() === 3;
+            return d.getDate() === day && d.getMonth() === month && d.getFullYear() === year;
           });
 
           return (
@@ -66,9 +88,9 @@ export default function InstagramPage() {
               <div className="text-[#475569] font-bold mb-0.5">{day}</div>
               {items.map(item => (
                 <div key={item.id} className="mb-0.5">
-                  <span className="mr-0.5">{TYPE_ICONS[item.content_type || ''] || ''}</span>
+                  <span className="mr-0.5 text-[8px]">{TYPE_ICONS[item.content_type || ''] || ''}</span>
                   <span style={{ color: THEMES[item.theme || ''] || '#94a3b8' }}>
-                    {item.published ? '✅' : '⏳'}
+                    {item.published ? 'OK' : '...'}
                   </span>
                 </div>
               ))}
@@ -85,7 +107,7 @@ export default function InstagramPage() {
             <div className="flex justify-between items-start">
               <div>
                 <div className="text-[11px] font-bold flex items-center gap-1.5">
-                  {TYPE_ICONS[item.content_type || '']} {item.theme}
+                  [{TYPE_ICONS[item.content_type || '']}] {item.theme}
                   <Tag color={THEMES[item.theme || ''] || '#64748b'}>{item.content_type || ''}</Tag>
                 </div>
                 <div className="text-[11px] text-[#94a3b8] mt-1">{item.content}</div>
@@ -101,12 +123,12 @@ export default function InstagramPage() {
       </div>
 
       {/* Published */}
-      <div className="text-xs font-bold text-[#4ade80] mb-2">Publicados ✅</div>
+      <div className="text-xs font-bold text-[#4ade80] mb-2">Publicados</div>
       <div className="space-y-2">
         {published.map(item => (
           <Card key={item.id} className="p-3 opacity-70">
             <div className="text-[11px] flex items-center gap-2">
-              {TYPE_ICONS[item.content_type || '']}
+              [{TYPE_ICONS[item.content_type || '']}]
               <span className="text-[#94a3b8]">{item.content}</span>
               <Tag color="#4ade80">Publicado</Tag>
             </div>

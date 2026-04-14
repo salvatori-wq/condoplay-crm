@@ -1,23 +1,18 @@
-// ═══ HAWKEYE — Agente de Prospecção Diária ═══
-// Roda todo dia comercial às 8h. Encontra 10 síndicos via scrapers gratuitos.
+// ═══ HAWKEYE — Agente de Prospeccao Diaria ═══
+// Roda todo dia comercial as 8h. Encontra 10 sindicos via scrapers gratuitos.
 // Salva leads no CRM e agenda LOKI para iniciar contato.
 //
 // Fontes (prioridade):
 //   1. CondominioemFoco.com.br — telefones diretos de administradoras
-//   2. CNPJ Enrichment — BrasilAPI/ReceitaWS (dados públicos Receita Federal)
-//   3. Google Maps — busca administradoras de condomínios
+//   2. CNPJ Enrichment — BrasilAPI/ReceitaWS (dados publicos Receita Federal)
+//   3. Google Maps — busca administradoras de condominios
 //   4. Apollo.io (fallback, precisa de API key paga)
 
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { runAllScrapers, type ScrapedContact } from '@/lib/scrapers';
+import { supabaseServer as supabase } from '@/lib/supabase-server';
+import { DEFAULT_TENANT_ID } from '@/lib/env';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
-
-const DEFAULT_TENANT_ID = 'aaaa0001-0000-0000-0000-000000000001';
 const DAILY_TARGET = 10;
 
 export async function POST() {
@@ -35,14 +30,14 @@ export async function POST() {
 
   try {
     console.log('[HAWKEYE] Starting daily prospecting run...');
-    await logAction('Iniciando prospecção diária — meta: 10 leads qualificados');
+    await logAction('Iniciando prospeccao diaria — meta: 10 leads qualificados');
 
     // ═══ PHASE 1: Scrape contacts from free sources ═══
     let scrapedContacts: ScrapedContact[] = [];
 
     try {
       const scraperResult = await runAllScrapers({
-        target: DAILY_TARGET + 5, // Buffer para duplicatas
+        target: DAILY_TARGET + 5,
       });
 
       scrapedContacts = scraperResult.contacts;
@@ -53,6 +48,7 @@ export async function POST() {
 
       if (scraperResult.errors.length > 0) {
         results.errors.push(...scraperResult.errors);
+        console.warn('[HAWKEYE] Scraper warnings:', scraperResult.errors.join('; '));
       }
 
       console.log(`[HAWKEYE] Scrapers found ${scrapedContacts.length} contacts`);
@@ -97,6 +93,7 @@ export async function POST() {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         results.errors.push(`Apollo fallback failed: ${msg}`);
+        console.error('[HAWKEYE] Apollo error:', msg);
       }
     }
 
@@ -110,33 +107,35 @@ export async function POST() {
     for (const contact of scrapedContacts) {
       if (savedCount >= DAILY_TARGET) break;
 
-      // Skip contacts without phone (LOKI needs phone for WhatsApp)
       if (!contact.phone) {
         results.withoutPhone++;
         continue;
       }
 
-      // Check for duplicates
-      const isDuplicate = await checkDuplicate(contact.phone, contact.email);
+      // Check for duplicates (use normalized phone)
+      const normalizedPhone = contact.phone.replace(/\D/g, '').replace(/^0+/, '');
+      const isDuplicate = await checkDuplicate(normalizedPhone, contact.email);
       if (isDuplicate) {
         results.duplicates++;
         continue;
       }
 
-      // Save to leads table
+      // ═══ ATOMIC: Save lead + create conversation together ═══
+      const leadId = crypto.randomUUID();
+
       const { data: savedLead, error: saveErr } = await supabase
         .from('leads')
         .insert({
-          id: crypto.randomUUID(),
+          id: leadId,
           tenant_id: DEFAULT_TENANT_ID,
           name: contact.name,
-          role: 'Administradora', // Administradoras são o contato principal
-          phone: contact.phone,
+          role: 'Administradora',
+          phone: normalizedPhone,
           email: contact.email,
           source: contact.source,
           source_cost: 0,
           status: 'prospectado',
-          qualified: true, // Tem telefone = qualificado
+          qualified: true,
           notes: `${contact.neighborhood ? contact.neighborhood + ' | ' : ''}${contact.city}, ${contact.state}`,
           metadata: {
             scraped_source: contact.source,
@@ -153,6 +152,7 @@ export async function POST() {
 
       if (saveErr) {
         results.errors.push(`Save failed for ${contact.name}: ${saveErr.message}`);
+        console.error(`[HAWKEYE] Save error for ${contact.name}:`, saveErr.message);
         continue;
       }
 
@@ -160,7 +160,7 @@ export async function POST() {
       results.newLeads++;
       results.withPhone++;
 
-      // Create conversation for LOKI
+      // Create conversation for LOKI (only if lead saved successfully)
       const { data: convo, error: convoErr } = await supabase
         .from('conversations')
         .insert({
@@ -169,7 +169,7 @@ export async function POST() {
           agent_type: 'loki',
           channel: 'whatsapp',
           contact_name: contact.name,
-          contact_phone: contact.phone,
+          contact_phone: normalizedPhone,
           contact_role: 'Administradora',
           status: 'aguardando',
           unread: 0,
@@ -178,48 +178,42 @@ export async function POST() {
         .single();
 
       if (convoErr) {
-        console.error(`[HAWKEYE] Conversation insert error for ${contact.name}:`, convoErr.message);
+        console.error(`[HAWKEYE] Conversation error for ${contact.name}:`, convoErr.message);
         results.errors.push(`Conversation failed for ${contact.name}: ${convoErr.message}`);
+        // Don't increment lokiQueued since conversation failed
+        continue;
       }
 
-      if (convo) {
-        results.lokiQueued++;
+      results.lokiQueued++;
 
-        // Schedule LOKI: 3 at 9:00, 3 at 10:00, 4 at 11:00
-        const scheduleHour = savedCount <= 3 ? 9 : savedCount <= 6 ? 10 : 11;
-        const scheduleMinute = Math.floor(Math.random() * 15);
+      // Schedule LOKI: 3 at 9:00, 3 at 10:00, 4 at 11:00
+      const scheduleHour = savedCount <= 3 ? 9 : savedCount <= 6 ? 10 : 11;
+      const scheduleMinute = Math.floor(Math.random() * 15);
 
-        // Log (tolerante a falha — agent_logs pode não existir ainda)
-        try {
-          await supabase.from('agent_logs').insert({
-            tenant_id: DEFAULT_TENANT_ID,
-            agent_type: 'loki',
-            action: `LOKI agendado: contatar ${contact.name} às ${scheduleHour}:${String(scheduleMinute).padStart(2, '0')}`,
-            detail: JSON.stringify({
-              conversation_id: convo.id,
-              lead_id: savedLead.id,
-              phone: contact.phone,
-              scheduled_hour: scheduleHour,
-              scheduled_minute: scheduleMinute,
-              type: 'first_contact',
-            }),
-            metadata: { source: 'hawkeye', action_type: 'loki_schedule' },
-          });
-        } catch {
-          // agent_logs não existe — não é bloqueante
-        }
-      }
+      await logAction(
+        `LOKI agendado: contatar ${contact.name} as ${scheduleHour}:${String(scheduleMinute).padStart(2, '0')}`,
+        JSON.stringify({
+          conversation_id: convo.id,
+          lead_id: savedLead.id,
+          phone: normalizedPhone,
+          scheduled_hour: scheduleHour,
+          scheduled_minute: scheduleMinute,
+          type: 'first_contact',
+        }),
+        { source: 'hawkeye', action_type: 'loki_schedule' },
+        'loki'
+      );
 
       console.log(
         `[HAWKEYE] Saved lead ${savedCount}/${DAILY_TARGET}: ${contact.name} ` +
-        `(${contact.phone}) [${contact.source}]`
+        `(${normalizedPhone}) [${contact.source}]`
       );
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
     await logAction(
-      `Prospecção concluída em ${elapsed}s: ` +
+      `Prospeccao concluida em ${elapsed}s: ` +
       `${results.newLeads} novos leads, ${results.withPhone} com telefone, ` +
       `${results.lokiQueued} agendados para LOKI. ` +
       `Fontes: Foco=${results.sources.condominioemfoco} CNPJ=${results.sources.cnpj} ` +
@@ -231,7 +225,7 @@ export async function POST() {
     return NextResponse.json({ ok: true, results });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('[HAWKEYE] Fatal error:', msg);
+    console.error('[HAWKEYE] Fatal error:', msg, err instanceof Error ? err.stack : '');
     await logAction(`ERRO FATAL: ${msg}`);
     return NextResponse.json({ ok: false, error: msg, results }, { status: 500 });
   }
@@ -243,7 +237,15 @@ async function checkDuplicate(phone: string | null, email: string | null): Promi
   if (!phone && !email) return false;
 
   const conditions: string[] = [];
-  if (phone) conditions.push(`phone.eq.${phone}`);
+  if (phone) {
+    // Check both with and without country code
+    conditions.push(`phone.eq.${phone}`);
+    if (phone.startsWith('55')) {
+      conditions.push(`phone.eq.${phone.substring(2)}`);
+    } else {
+      conditions.push(`phone.eq.55${phone}`);
+    }
+  }
   if (email) conditions.push(`email.eq.${email}`);
 
   const { data } = await supabase
@@ -255,16 +257,25 @@ async function checkDuplicate(phone: string | null, email: string | null): Promi
   return !!(data && data.length > 0);
 }
 
-async function logAction(action: string) {
+async function logAction(
+  action: string,
+  detail?: string,
+  metadata?: Record<string, unknown>,
+  agentType: string = 'hawkeye'
+) {
   try {
-    await supabase.from('agent_logs').insert({
+    const { error } = await supabase.from('agent_logs').insert({
       tenant_id: DEFAULT_TENANT_ID,
-      agent_type: 'hawkeye',
+      agent_type: agentType,
       action,
-      metadata: { source: 'hawkeye_daily_run' },
+      detail: detail || null,
+      metadata: metadata || { source: 'hawkeye_daily_run' },
     });
-  } catch {
-    console.log(`[HAWKEYE] Log (agent_logs table may not exist): ${action}`);
+    if (error) {
+      console.error(`[HAWKEYE] agent_logs insert error: ${error.message}`);
+    }
+  } catch (err) {
+    console.error('[HAWKEYE] Failed to log action:', err instanceof Error ? err.message : err);
   }
 }
 

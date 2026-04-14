@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sendTextMessage } from '@/lib/evolution-api';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
-
-const DEFAULT_TENANT_ID = 'aaaa0001-0000-0000-0000-000000000001';
+import { supabaseServer as supabase } from '@/lib/supabase-server';
+import { DEFAULT_TENANT_ID } from '@/lib/env';
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,17 +14,20 @@ export async function POST(req: NextRequest) {
     // Normalize phone
     const normalizedPhone = phone.replace(/\D/g, '').replace(/^0+/, '');
 
-    // Strip diacritics for Evolution API compatibility (UTF-8 bug workaround)
-    const safeText = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-    // Send via Evolution API
-    const result = await sendTextMessage(normalizedPhone, safeText);
+    // Send via Evolution API (encoding handled inside sendTextMessage)
+    let result;
+    try {
+      result = await sendTextMessage(normalizedPhone, text);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Send] Evolution API error:', msg);
+      return NextResponse.json({ error: 'send_failed', detail: msg }, { status: 502 });
+    }
 
     // Find or create conversation
     let convId = conversationId;
 
     if (!convId) {
-      // Try to find existing conversation for this phone
       const { data: existing } = await supabase
         .from('conversations')
         .select('id')
@@ -58,7 +55,6 @@ export async function POST(req: NextRequest) {
 
         const lead = leads?.[0] || null;
 
-        // Create new conversation
         const { data: newConvo, error: createErr } = await supabase
           .from('conversations')
           .insert({
@@ -77,33 +73,40 @@ export async function POST(req: NextRequest) {
           .single();
 
         if (createErr) {
-          console.error('[Send] Error creating conversation:', createErr);
+          console.error('[Send] Error creating conversation:', createErr.message);
         } else {
           convId = newConvo.id;
-          console.log('[Send] Created new conversation:', convId, 'for', normalizedPhone);
         }
       }
     }
 
     // Save outgoing message to DB
     if (convId) {
-      await supabase.from('messages').insert({
+      const { error: insertErr } = await supabase.from('messages').insert({
         conversation_id: convId,
         from_type: 'agent',
         content: text,
         metadata: {
           phone: normalizedPhone,
-          evolution_response: result,
           agent_type: agentType || 'hawkeye',
           sent_via: 'crm_api',
         },
       });
 
-      // Update timestamp
-      await supabase
+      if (insertErr) {
+        console.error('[Send] Error saving message:', insertErr.message);
+      }
+
+      const { error: updateErr } = await supabase
         .from('conversations')
         .update({ unread: 0, updated_at: new Date().toISOString() })
         .eq('id', convId);
+
+      if (updateErr) {
+        console.error('[Send] Error updating conversation:', updateErr.message);
+      }
+    } else {
+      console.warn('[Send] Message sent but no conversation tracked for phone:', normalizedPhone);
     }
 
     return NextResponse.json({ ok: true, conversation_id: convId, result });
