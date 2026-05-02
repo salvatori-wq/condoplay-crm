@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
+import { supabaseServer as supabase } from '@/lib/supabase-server';
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,17 +12,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'lossReason required' }, { status: 400 });
     }
 
-    // Update conversation status to PERDIDA
     const { data, error } = await supabase
-      .from('WhatsAppConversa')
+      .from('conversations')
       .update({
-        status: 'PERDIDA',
-        motivoPerda: lossReason,
-        notasPerda: lossNotes || null,
-        atualizadoEm: new Date().toISOString(),
+        status: 'perdido',
+        updated_at: new Date().toISOString(),
       })
       .eq('id', conversationId)
-      .select('id, tipo, nomeContato, motivoPerda')
+      .select('id, agent_type, contact_name, lead_id')
       .single();
 
     if (error) {
@@ -35,75 +27,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'update_failed' }, { status: 500 });
     }
 
-    // Also update linked lead status if exists
-    const { data: convo } = await supabase
-      .from('WhatsAppConversa')
-      .select('leadId')
-      .eq('id', conversationId)
-      .single();
-
-    if (convo?.leadId) {
+    // Update linked lead status if exists
+    if (data?.lead_id) {
       await supabase
-        .from('LeadProspectado')
-        .update({ status: 'PERDIDO', atualizadoEm: new Date().toISOString() })
-        .eq('id', convo.leadId);
-    }
-
-    // Log for training analysis
-    try {
-      await supabase.from('LeadFeedback').insert({
-        leadId: convo?.leadId || null,
-        conversaId: conversationId,
-        tipo: 'PERDA',
-        motivo: lossReason,
-        notas: lossNotes || null,
-        agente: data.tipo,
-        criadoEm: new Date().toISOString(),
-      });
-    } catch {
-      console.log('[MarkLost] LeadFeedback insert skipped');
+        .from('leads')
+        .update({ status: 'perdido' })
+        .eq('id', data.lead_id);
     }
 
     return NextResponse.json({ ok: true, conversation: data });
   } catch (err) {
     console.error('[MarkLost] Error:', err);
-    return NextResponse.json({ error: 'server_error' }, { status: 500 });
-  }
-}
-
-// GET: loss reasons analytics for agent training
-export async function GET() {
-  try {
-    const { data, error } = await supabase
-      .from('WhatsAppConversa')
-      .select('tipo, motivoPerda, notasPerda, nomeContato, atualizadoEm')
-      .eq('status', 'PERDIDA')
-      .not('motivoPerda', 'is', null)
-      .order('atualizadoEm', { ascending: false });
-
-    if (error) {
-      return NextResponse.json({ error: 'query_failed' }, { status: 500 });
-    }
-
-    // Aggregate by reason
-    const byReason: Record<string, number> = {};
-    const byAgent: Record<string, Record<string, number>> = {};
-    for (const row of data || []) {
-      const reason = row.motivoPerda || 'unknown';
-      byReason[reason] = (byReason[reason] || 0) + 1;
-      if (!byAgent[row.tipo]) byAgent[row.tipo] = {};
-      byAgent[row.tipo][reason] = (byAgent[row.tipo][reason] || 0) + 1;
-    }
-
-    return NextResponse.json({
-      ok: true,
-      total: data?.length || 0,
-      byReason,
-      byAgent,
-      recent: data?.slice(0, 20),
-    });
-  } catch (err) {
-    console.error('[MarkLost GET] Error:', err);
     return NextResponse.json({ error: 'server_error' }, { status: 500 });
   }
 }

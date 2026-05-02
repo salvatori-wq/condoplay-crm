@@ -32,6 +32,14 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# PERMITIR templates commitaveis (estrutura sem segredos):
+!.env.condoplay.example
+!.env.example
+
+# migration dumps (NUNCA commitar — contem dados PII)
+/migration-dump/
+*.dump
+*.sql.gz
 
 # vercel
 .vercel

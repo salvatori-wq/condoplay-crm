@@ -12,7 +12,7 @@ import { supabaseServer as supabase } from '@/lib/supabase-server';
 import { DEFAULT_TENANT_ID } from '@/lib/env';
 
 // ═══ SYSTEM PROMPT DO LOKI ═══
-const LOKI_SYSTEM_PROMPT = `Voce e Joao Salvatori, Diretor Comercial da Condo Play.
+const LOKI_SYSTEM_PROMPT_BASE = `Voce e Joao Salvatori, Diretor Comercial da Condo Play.
 A Condo Play leva jogos de tabuleiro modernos para condominios, criando convivencia entre moradores.
 Missao: "Autoridade Máxima em Lazer Condominial"
 
@@ -24,14 +24,21 @@ Missao: "Autoridade Máxima em Lazer Condominial"
 - NUNCA parece robotico. Fale como um empresario jovem e apaixonado pelo negocio.
 - Desafiador: questione a forma como eles pensam sobre lazer como custo (nao como investimento)
 
+═══ PROVA SOCIAL ═══
+- Condominios como Vila Olimpia e Alphaville ja adotaram a Condo Play
+- 73% de engajamento medio no primeiro mes de implementacao
+- Moradores reportam melhora significativa na convivencia
+- Sindicos destacam reducao de reclamacoes sobre areas de lazer
+- "Desde que implementamos, o salao de jogos virou o espaco mais usado do condominio" — sindico em Pinheiros
+
 ═══ POSICIONAMENTO CONDO PLAY ═══
 PILARES DE VALOR:
-1. Visão Institucional: Eleva o status e reputação do condomínio
-2. Excelência de Produto: Jogos modernos de tabuleiro reconhecidos
-3. Eficiência Operacional: Acervo rotativo, suporte, treinamento
-4. Qualidade de Entretenimento: Convivência genuína entre moradores
-5. Impacto Comunitário: Valoriza o imóvel, reduz rotatividade
-6. Modelo de Parceria: Flexível, escalável, resulta-orientado
+1. Visao Institucional: Eleva o status e reputacao do condominio
+2. Excelencia de Produto: Jogos modernos de tabuleiro reconhecidos
+3. Eficiencia Operacional: Acervo rotativo, suporte, treinamento
+4. Qualidade de Entretenimento: Convivencia genuina entre moradores
+5. Impacto Comunitario: Valoriza o imovel, reduz rotatividade
+6. Modelo de Parceria: Flexivel, escalavel, resulta-orientado
 
 POSICIONAMENTO: Nao vendemos "jogos". Vendemos "aumento de valor de propriedade" + "qualidade de vida"
 
@@ -71,37 +78,47 @@ JORNADA DE VENDA:
 2. Estudo de Viabilidade (ROI, engajamento)
 3. Implementacao Express (7 dias)
 
-═══ TECNICAS DE VENDA (HARVARD + CHALLENGER) ═══
+═══ TECNICAS DE VENDA ═══
 
-**SPIN SELLING (Descoberta):**
-- SITUATION: "Como e atualmente a area de lazer? Quantas unidades?"
-- PROBLEM: "Voce ja recebeu reclamacoes sobre entretenimento?"
-- IMPLICATION: "Se isso continuar, como afeta o engajamento e valor da propriedade?"
-- NEED-PAYOFF: "O que seria ideal para trazer vida a area de lazer?"
+**SPIN SELLING (Descoberta — use na ordem):**
+1. SITUATION: "Como e atualmente a area de lazer? Quantas unidades tem?"
+2. PROBLEM: "Voce ja recebeu reclamacoes sobre entretenimento ou convivencia?"
+3. IMPLICATION: "Se isso continuar, como afeta o engajamento, valor do imovel e satisfacao dos moradores?"
+4. NEED-PAYOFF: "O que seria ideal para trazer vida a area de lazer e reduzir essas reclamacoes?"
+Use as etapas PROGRESSIVAMENTE — nao pule direto para Need-Payoff sem passar por Problem/Implication.
 
 **CHALLENGER SALE (Teach-Tailor-Take Control):**
-- TEACH: Questione o pensamento convencional. "Lazer e investimento, nao custo."
-- TAILOR: Adapte a solucao ao seu condominio (Essential, Premium ou Elite)
-- TAKE CONTROL: Dirija a conversa para demonstracao + viabilidade
+- TEACH: Compartilhe um insight que mude a perspectiva. "A maioria dos sindicos trata lazer como custo. Os melhores condominios de SP tratam como investimento em retencao."
+- TAILOR: Adapte a solucao ao contexto especifico do condominio (tamanho, perfil moradores, orcamento)
+- TAKE CONTROL: Dirija a conversa para o proximo passo concreto (reuniao de viabilidade)
+Use Challenger quando o sindico estiver acomodado ou resistente a mudanca.
 
 **CONSULTATIVE SELLING:**
 - Foque em OUVIR primeiro (descubra a dor real)
 - Depois DIAGNOSTIQUE (confirme se e lazer/comunidade)
 - Entao PRESCREVA (solucao Condo Play)
 
-**OBJECOES (BANT Framework):**
-- BUDGET: "Quanto pode investir em lazer por mes?"
-  - Feel-Felt-Found: "Entendo, sindicos em SP sentiram o mesmo no inicio. Descobriram que R$1.5k/mes recupera em engajamento."
-  - Reframe: "Considere como R$X por unidade/mes, nao como gasto geral."
+═══ OBJECOES ESPECIFICAS — RESPOSTAS PRONTAS ═══
 
-- AUTHORITY: "Preciso consultar o conselho"
-  - PERFEITO! "Vamos preparar um pitch para apresentar. Quando e a proxima reuniao?"
+"MUITO CARO" / "NAO TEMOS ORCAMENTO":
+- Feel-Felt-Found: "Entendo perfeitamente. Sindicos em condominios como Vila Olimpia sentiram o mesmo. Descobriram que R$1.500/mes dividido por 80 unidades sao menos de R$19 por apartamento. Moradores nem percebem na taxa."
+- Reframe: "Considere como R$X por unidade/mes, nao como gasto geral. E menos que um cafe por morador."
+- Challenger: "Quanto o condominio gasta por mes em areas de lazer que ninguem usa?"
 
-- NEED: "Nao temos certeza se moradores vao usar"
-  - Challenge: "Vamos fazer estudo de viabilidade. Dados mostram 73% de engajamento em condominios similares."
+"NAO TENHO INTERESSE":
+- Curious probe: "Entendo. So por curiosidade — como esta a ocupacao das areas comuns hoje? Moradores usam?"
+- Insight drop: "Condominios que nao investem em convivencia tem 40% mais rotatividade. Mas entendo, talvez nao seja o momento."
+- Se insistir: Respeite e encerre com elegancia. "Sem problema algum. Fico a disposicao se mudar de ideia."
 
-- TIMING: "Agora nao e a melhor epoca"
-  - Urgency: "Quanto mais cedo implementar, maior o ROI antes do fim do ano."
+"JA TEMOS AREA DE LAZER":
+- Challenger: "Otimo! Mas area de lazer e diferente de area de lazer UTILIZADA. Qual a ocupacao real?"
+- Insight: "A maioria dos condominios tem salao de jogos, mas com jogos desatualizados que ninguem toca. Nosso acervo rotativo resolve exatamente isso."
+- Bridge: "Na verdade, a Condo Play complementa o que voces ja tem. Vamos explorar?"
+
+"PRECISO CONSULTAR O CONSELHO":
+- PERFEITO! Nao e objecao, e oportunidade.
+- "Excelente! Vamos preparar um material especifico para apresentar ao conselho. Quando e a proxima reuniao?"
+- "Posso participar da apresentacao — um estudo de viabilidade com dados do seu condominio convence muito mais."
 
 ═══ MULTI-STAKEHOLDER STRATEGY ═══
 Sindico nao decide sozinho. Prepare para:
@@ -109,7 +126,7 @@ Sindico nao decide sozinho. Prepare para:
 - Assembleia de proprietarios
 - Comissao de lazer/recreacao
 
-Mensagem deve apelara:
+Mensagem deve apelar a:
 - Sindico: Eficiencia operacional, reducao de reclamacoes
 - Financeiro: ROI, custo por unidade, retencao
 - Moradores: Qualidade de vida, comunidade, valor do imovel
@@ -135,12 +152,157 @@ Marcar uma reuniao (videoconferencia ou presencial).
 7. SEMPRE apela a impacto comunitario + valor de propriedade, NAO apenas "diversao"
 
 ═══ CONTATO & CONFIRMACAO ═══
-SALVATORI EMAIL: salvatori@washme.com.br (enviar confirmacao por email)
-PERSONA: Joao Salvatori, Diretor Comercial, Condo Play
+EMAIL: contato@condoplay.com.br (substituir pelo email oficial da Condo Play)
+PERSONA: Diretor Comercial, Condo Play
 TONE: Consultor apaixonado, nao vendedor
 
 ═══ FORMATO DE RESPOSTA ═══
 Responda APENAS com a mensagem que sera enviada ao sindico. Sem explicacoes extras. Max 3-4 paragrafos, WhatsApp natural.`;
+
+// Build dynamic system prompt with tracked context
+function buildSystemPrompt(context?: LeadContext): string {
+  if (!context || !context.interaction_count) return LOKI_SYSTEM_PROMPT_BASE;
+
+  let dynamicSection = `\n\n═══ CONTEXTO DINAMICO DESTA CONVERSA ═══`;
+  dynamicSection += `\nInteracoes anteriores: ${context.interaction_count}`;
+  dynamicSection += `\nNivel de interesse detectado: ${context.interest_level || 'desconhecido'}`;
+
+  if (context.last_intent) {
+    dynamicSection += `\nUltima intencao do sindico: ${context.last_intent}`;
+  }
+
+  if (context.objections && context.objections.length > 0) {
+    dynamicSection += `\nObjecoes ja levantadas: ${context.objections.join(', ')}`;
+    dynamicSection += `\nIMPORTANTE: NAO repita argumentos ja usados para estas objecoes. Use angulos diferentes.`;
+  }
+
+  if (context.interest_level === 'high') {
+    dynamicSection += `\nESTRATEGIA: Interesse alto — direcione para reuniao com urgencia sutil.`;
+  } else if (context.interest_level === 'low') {
+    dynamicSection += `\nESTRATEGIA: Interesse baixo — use Challenger Sale (teach com insight novo) para reengajar.`;
+  } else {
+    dynamicSection += `\nESTRATEGIA: Interesse medio — aprofunde com SPIN (Problem/Implication) para criar necessidade.`;
+  }
+
+  return LOKI_SYSTEM_PROMPT_BASE + dynamicSection;
+}
+
+// ═══ INTENT CLASSIFICATION TYPES ═══
+
+type IntentType = 'meeting_confirmed' | 'interested' | 'objection' | 'question' | 'not_interested' | 'unknown';
+
+interface LeadContext {
+  last_intent?: IntentType;
+  interaction_count?: number;
+  interest_level?: 'high' | 'medium' | 'low';
+  objections?: string[];
+}
+
+// Classify the syndic's intent via lightweight LLM call
+async function classifyIntent(syndicMessage: string, conversationHistory: string): Promise<{ intent: IntentType; objection?: string }> {
+  try {
+    const classificationPrompt = `Analise a ULTIMA mensagem do sindico no contexto da conversa e classifique a intencao.
+
+CONVERSA RECENTE:
+${conversationHistory}
+
+ULTIMA MENSAGEM DO SINDICO:
+"${syndicMessage}"
+
+Classifique a intencao em EXATAMENTE uma destas categorias:
+- meeting_confirmed: O sindico ACEITOU/CONFIRMOU uma reuniao (disse sim a horario, dia, ou confirmou presenca). Apenas se CLARAMENTE aceitou.
+- interested: Demonstra interesse, faz perguntas positivas, quer saber mais, pede detalhes.
+- objection: Levanta objecao (preco, timing, necessidade, autoridade). Se for objecao, identifique qual.
+- question: Pergunta neutra sem demonstrar interesse claro nem objecao.
+- not_interested: Recusa clara, pede para parar, nao quer contato.
+- unknown: Mensagem ambigua ou nao relacionada.
+
+Responda APENAS no formato:
+INTENT: <categoria>
+OBJECTION: <descricao curta da objecao OU "none">`;
+
+    const result = await callLLM(
+      [
+        { role: 'system', content: 'Voce e um classificador de intencao de mensagens de vendas. Responda APENAS no formato solicitado, sem explicacoes.' },
+        { role: 'user', content: classificationPrompt },
+      ],
+      { task: 'light', maxTokens: 128, cacheSystemPrompt: false }
+    );
+
+    const text = result.text.trim();
+    const intentMatch = text.match(/INTENT:\s*(meeting_confirmed|interested|objection|question|not_interested|unknown)/i);
+    const objectionMatch = text.match(/OBJECTION:\s*(.+)/i);
+
+    const intent = (intentMatch?.[1]?.toLowerCase() as IntentType) || 'unknown';
+    const objection = objectionMatch?.[1]?.trim();
+
+    return {
+      intent,
+      objection: objection && objection.toLowerCase() !== 'none' ? objection : undefined,
+    };
+  } catch (err) {
+    console.error('[LOKI] Intent classification failed:', err);
+    return { intent: 'unknown' };
+  }
+}
+
+// Determine interest level from intent history
+function computeInterestLevel(currentIntent: IntentType, previousLevel?: string, interactionCount?: number): 'high' | 'medium' | 'low' {
+  if (currentIntent === 'meeting_confirmed') return 'high';
+  if (currentIntent === 'not_interested') return 'low';
+  if (currentIntent === 'interested') return 'high';
+  if (currentIntent === 'objection') {
+    // Objections can mean engagement — depends on count
+    if (previousLevel === 'high') return 'medium';
+    return 'medium';
+  }
+  if (currentIntent === 'question') {
+    if (previousLevel === 'high') return 'high';
+    return 'medium';
+  }
+  // unknown
+  return (previousLevel as 'high' | 'medium' | 'low') || 'medium';
+}
+
+// Update lead metadata with context tracking
+async function updateLeadContext(
+  leadId: string,
+  intent: IntentType,
+  objection?: string,
+  existingMetadata?: Record<string, unknown>
+): Promise<LeadContext> {
+  const existing: LeadContext = {
+    last_intent: existingMetadata?.last_intent as IntentType | undefined,
+    interaction_count: (existingMetadata?.interaction_count as number) || 0,
+    interest_level: existingMetadata?.interest_level as 'high' | 'medium' | 'low' | undefined,
+    objections: (existingMetadata?.objections as string[]) || [],
+  };
+
+  const newContext: LeadContext = {
+    last_intent: intent,
+    interaction_count: (existing.interaction_count || 0) + 1,
+    interest_level: computeInterestLevel(intent, existing.interest_level, existing.interaction_count),
+    objections: existing.objections || [],
+  };
+
+  // Add new objection if detected and not already tracked
+  if (objection && !newContext.objections!.includes(objection)) {
+    newContext.objections = [...newContext.objections!, objection];
+  }
+
+  // Merge with existing metadata (preserve other fields)
+  const updatedMetadata = {
+    ...(existingMetadata || {}),
+    ...newContext,
+  };
+
+  await supabase
+    .from('leads')
+    .update({ metadata: updatedMetadata, updated_at: new Date().toISOString() })
+    .eq('id', leadId);
+
+  return newContext;
+}
 
 // ═══ ENDPOINTS ═══
 
@@ -218,7 +380,7 @@ async function handleFirstContact(body: { conversationId: string; leadId?: strin
 
   // Generate first contact message using SPIN (Situation) opening
   const response = await callLLM([
-    { role: 'system', content: LOKI_SYSTEM_PROMPT },
+    { role: 'system', content: LOKI_SYSTEM_PROMPT_BASE },
     {
       role: 'user',
       content: `Gere a PRIMEIRA mensagem de abordagem para este sindico usando descoberta SPIN (Situation Question).${leadInfo}
@@ -319,8 +481,10 @@ async function handleResponse(body: { conversationId: string; incomingMessage: s
   // Add the new incoming message
   chatHistory.push({ role: 'user' as const, content: incomingMessage });
 
-  // Get lead info
+  // Get lead info and existing context
   let leadContext = '';
+  let leadMetadata: Record<string, unknown> = {};
+  let existingContext: LeadContext = {};
   if (convo.lead_id) {
     const { data: lead } = await supabase
       .from('leads')
@@ -330,8 +494,18 @@ async function handleResponse(body: { conversationId: string; incomingMessage: s
 
     if (lead) {
       leadContext = `\n[CONTEXTO: Lead ${lead.name}, ${lead.role}. Status: ${lead.status}. ${lead.notes || ''}]`;
+      leadMetadata = (lead.metadata as Record<string, unknown>) || {};
+      existingContext = {
+        last_intent: leadMetadata.last_intent as IntentType | undefined,
+        interaction_count: (leadMetadata.interaction_count as number) || 0,
+        interest_level: leadMetadata.interest_level as 'high' | 'medium' | 'low' | undefined,
+        objections: (leadMetadata.objections as string[]) || [],
+      };
     }
   }
+
+  // Build dynamic system prompt with tracked context
+  const dynamicPrompt = buildSystemPrompt(existingContext);
 
   // Generate response using SPIN (Problem/Implication) and Challenger Sale
   const frameworkHint = `
@@ -340,7 +514,7 @@ Se resistencia/objecao aparece, use Challenger Sale (questione convencao) + BANT
 Dirija para reuniao de viabilidade/demonstracao.]`;
 
   const response = await callLLM([
-    { role: 'system', content: LOKI_SYSTEM_PROMPT + leadContext + frameworkHint },
+    { role: 'system', content: dynamicPrompt + leadContext + frameworkHint },
     ...chatHistory,
   ]);
 
@@ -371,28 +545,39 @@ Dirija para reuniao de viabilidade/demonstracao.]`;
     .update({ unread: 0, updated_at: new Date().toISOString() })
     .eq('id', conversationId);
 
-  // Check if meeting was scheduled (simple keyword detection)
-  const meetingKeywords = ['reuniao', 'reunião', 'agenda', 'marcar', 'horario', 'horário', '12h', '18h', 'meet'];
-  const hasMeetingTopic = meetingKeywords.some(k =>
-    response.text.toLowerCase().includes(k) || incomingMessage.toLowerCase().includes(k)
-  );
+  // ═══ INTENT CLASSIFICATION — Classify syndic's message, NOT LOKI's response ═══
+  const conversationHistoryText = (messages || [])
+    .slice(-6) // last 6 messages for context
+    .map(m => `${m.from_type === 'agent' ? 'Joao' : 'Sindico'}: ${m.content}`)
+    .join('\n');
 
-  if (hasMeetingTopic && convo.lead_id) {
-    await supabase
-      .from('leads')
-      .update({ status: 'reuniao', updated_at: new Date().toISOString() })
-      .eq('id', convo.lead_id);
+  const { intent, objection } = await classifyIntent(incomingMessage, conversationHistoryText);
+
+  // Update lead context tracking
+  let updatedContext: LeadContext = existingContext;
+  if (convo.lead_id) {
+    updatedContext = await updateLeadContext(convo.lead_id, intent, objection, leadMetadata);
+
+    // Only update to "reuniao" when syndic CONFIRMS a meeting (not when LOKI proposes one)
+    if (intent === 'meeting_confirmed') {
+      await supabase
+        .from('leads')
+        .update({ status: 'reuniao', updated_at: new Date().toISOString() })
+        .eq('id', convo.lead_id);
+    }
   }
 
   await logAction(
     `Respondeu ${convo.contact_name}: "${response.text.substring(0, 60)}..." via ${response.provider}`,
-    { conversation_id: conversationId }
+    { conversation_id: conversationId, intent, objection, context: updatedContext }
   );
 
   return NextResponse.json({
     ok: true,
     message_sent: response.text,
     provider: response.provider,
+    intent,
+    context: updatedContext,
   });
 }
 
@@ -468,7 +653,7 @@ async function handleFollowUp(body: { conversationId: string }) {
   };
 
   const response = await callLLM([
-    { role: 'system', content: LOKI_SYSTEM_PROMPT },
+    { role: 'system', content: LOKI_SYSTEM_PROMPT_BASE },
     ...chatHistory,
     {
       role: 'user',

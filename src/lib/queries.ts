@@ -1,178 +1,206 @@
 import { supabase } from './supabase';
 import type { AgentLog, AgentConfig, Conversation, Message, SearchLog, Condo, Lead, Invoice, ContentCalendar, Checkout, AgentType } from '@/types/database';
 
+// ═══ COLUMN SELECTORS ═══
+// Listas explícitas evitam o custo de `select('*')` (que traz todas as colunas,
+// incluindo JSONB pesados como `metadata`). Sempre que possível pedimos só o
+// que a UI usa. Se uma tela precisar de campo extra, adicionar aqui.
+
+const LEAD_COLS =
+  'id,tenant_id,name,role,phone,email,source,source_cost,status,qualified,notes,metadata,created_at,updated_at';
+
+const CONDO_COLS =
+  'id,tenant_id,name,address,units,sindico_lead_id,status,monthly_plan,onboarded_at,created_at';
+
+const CONVERSATION_COLS =
+  'id,tenant_id,lead_id,condo_id,agent_type,channel,contact_name,contact_phone,contact_role,status,unread,archived,loss_reason,loss_notes,created_at,updated_at';
+
+const MESSAGE_COLS = 'id,conversation_id,from_type,content,metadata,created_at';
+
+const INVOICE_COLS =
+  'id,condo_id,tenant_id,month,plan_amount,extra_fees,total,status,paid_at,created_at';
+
+const SEARCH_LOG_COLS =
+  'id,tenant_id,source,query,cost,results_count,qualified_count,leads_found,created_at';
+
+const AGENT_LOG_COLS = 'id,tenant_id,agent_type,action,detail,metadata,created_at';
+
+const CHECKOUT_COLS =
+  'id,condo_game_id,condo_id,tenant_id,resident_name,apt,checked_out_at,checked_in_at,hours_elapsed,fee_charged,created_at';
+
+const CONTENT_CALENDAR_COLS =
+  'id,tenant_id,day_of_week,theme,content_type,content,scheduled_at,published,created_at';
+
+// ═══ PAGINATION ═══
+
+export interface PageOpts {
+  /** Zero-based page index. Default 0. */
+  page?: number;
+  /** Page size. Default 50, max 200. */
+  pageSize?: number;
+}
+
+function rangeFor(opts?: PageOpts): { from: number; to: number } {
+  const page = Math.max(0, opts?.page ?? 0);
+  const size = Math.min(200, Math.max(1, opts?.pageSize ?? 50));
+  const from = page * size;
+  return { from, to: from + size - 1 };
+}
+
 // ═══ AGENT LOGS ═══
 export async function getAgentLogs(limit = 25) {
   const { data, error } = await supabase
     .from('agent_logs')
-    .select('*')
+    .select(AGENT_LOG_COLS)
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return data as AgentLog[];
+  return (data || []) as AgentLog[];
 }
 
 // ═══ LEADS ═══
-export async function getLeads() {
+export async function getLeads(opts?: PageOpts) {
+  const { from, to } = rangeFor(opts);
   const { data, error } = await supabase
     .from('leads')
-    .select('*')
-    .order('created_at', { ascending: false });
+    .select(LEAD_COLS)
+    .order('created_at', { ascending: false })
+    .range(from, to);
   if (error) throw error;
-  return data as Lead[];
+  return (data || []) as Lead[];
 }
 
 // ═══ CONDOS ═══
 export async function getCondos() {
   const { data, error } = await supabase
     .from('condos')
-    .select('*')
+    .select(CONDO_COLS)
     .order('name');
   if (error) throw error;
-  return data as Condo[];
+  return (data || []) as Condo[];
 }
 
 // ═══ CONVERSATIONS ═══
-export async function getConversations(opts?: { agentType?: AgentType; archived?: boolean; status?: string }) {
+export async function getConversations(
+  opts?: { agentType?: AgentType; archived?: boolean; status?: string } & PageOpts
+) {
+  const { from, to } = rangeFor(opts);
   let query = supabase
-    .from('WhatsAppConversa')
-    .select('*')
-    .order('atualizadoEm', { ascending: false });
-
-  // Default: hide archived unless explicitly requested
-  query = query.eq('arquivada', opts?.archived === true ? true : false);
+    .from('conversations')
+    .select(CONVERSATION_COLS)
+    .order('updated_at', { ascending: false })
+    .range(from, to);
 
   if (opts?.agentType) {
-    query = query.eq('tipo', opts.agentType);
+    query = query.eq('agent_type', opts.agentType);
   }
   if (opts?.status) {
     query = query.eq('status', opts.status);
   }
-
-  const { data, error } = await query;
-
-  if (error) {
-    // Fallback: retry without arquivada filter (column might not exist yet)
-    let fallback = supabase
-      .from('WhatsAppConversa')
-      .select('*')
-      .order('atualizadoEm', { ascending: false });
-    if (opts?.agentType) fallback = fallback.eq('tipo', opts.agentType);
-    if (opts?.status) fallback = fallback.eq('status', opts.status);
-    const { data: fbData, error: fbError } = await fallback;
-    if (fbError) throw fbError;
-    return (fbData || []).map(c => ({
-      ...c,
-      archived: false, loss_reason: null, loss_notes: null,
-      // Map JARVIS schema to UI expected fields
-      agent_type: c.tipo, contact_name: c.nomeContato, contact_phone: c.telefone,
-      unread: c.naoLidas, updated_at: c.atualizadoEm, created_at: c.criadoEm,
-    })) as unknown as Conversation[];
+  if (opts?.archived !== undefined) {
+    query = query.eq('archived', opts.archived);
   }
 
-  // Map JARVIS schema fields to UI expected shape
-  return (data || []).map(c => ({
-    ...c,
-    agent_type: c.tipo, contact_name: c.nomeContato, contact_phone: c.telefone,
-    unread: c.naoLidas, updated_at: c.atualizadoEm, created_at: c.criadoEm,
-    archived: c.arquivada || false, loss_reason: c.motivoPerda, loss_notes: c.notasPerda,
-    lead_id: c.leadId,
-  })) as unknown as Conversation[];
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []) as Conversation[];
 }
 
 // ═══ AGENT CONFIG (pause status) ═══
 export async function getAgentConfigs() {
   const { data, error } = await supabase
     .from('AgentConfig')
-    .select('*');
+    .select('id,tenant_id,agent_type,paused,paused_at,paused_by,updated_at');
   if (error) return [] as AgentConfig[];
-  return data as AgentConfig[];
+  return (data || []) as AgentConfig[];
 }
 
-export async function getMessages(conversationId: string) {
+export async function getMessages(conversationId: string, opts?: PageOpts) {
+  const { from, to } = rangeFor({ pageSize: opts?.pageSize ?? 200, page: opts?.page });
   const { data, error } = await supabase
-    .from('WhatsAppMensagem')
-    .select('*')
-    .eq('conversaId', conversationId)
-    .order('criadoEm', { ascending: true });
+    .from('messages')
+    .select(MESSAGE_COLS)
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true })
+    .range(from, to);
   if (error) throw error;
-  // Map to UI expected shape
-  return (data || []).map(m => ({
-    ...m,
-    conversation_id: m.conversaId,
-    from_type: m.direcao === 'ENVIADA' ? 'agent' : 'contact',
-    content: m.conteudo,
-    created_at: m.criadoEm,
-    metadata: {},
-  })) as unknown as Message[];
+  return (data || []) as Message[];
 }
 
 // ═══ SEARCH LOGS ═══
-export async function getSearchLogs() {
+export async function getSearchLogs(opts?: PageOpts) {
+  const { from, to } = rangeFor(opts);
   const { data, error } = await supabase
     .from('search_logs')
-    .select('*')
-    .order('created_at', { ascending: false });
+    .select(SEARCH_LOG_COLS)
+    .order('created_at', { ascending: false })
+    .range(from, to);
   if (error) throw error;
-  return data as SearchLog[];
+  return (data || []) as SearchLog[];
 }
 
 // ═══ INVOICES ═══
-export async function getInvoices() {
+export async function getInvoices(opts?: PageOpts) {
+  const { from, to } = rangeFor(opts);
   const { data, error } = await supabase
     .from('invoices')
-    .select('*')
-    .order('created_at', { ascending: false });
+    .select(INVOICE_COLS)
+    .order('created_at', { ascending: false })
+    .range(from, to);
   if (error) throw error;
-  return data as Invoice[];
+  return (data || []) as Invoice[];
 }
 
 // ═══ CHECKOUTS ═══
-export async function getCheckouts() {
+export async function getCheckouts(opts?: PageOpts) {
+  const { from, to } = rangeFor(opts);
   const { data, error } = await supabase
     .from('checkouts')
-    .select('*, condo:condos(name)')
-    .order('checked_out_at', { ascending: false });
+    .select(`${CHECKOUT_COLS}, condo:condos(name)`)
+    .order('checked_out_at', { ascending: false })
+    .range(from, to);
   if (error) throw error;
-  return data as (Checkout & { condo: { name: string } })[];
+  return (data || []) as unknown as (Checkout & { condo: { name: string } })[];
 }
 
 // ═══ CONTENT CALENDAR ═══
 export async function getContentCalendar() {
   const { data, error } = await supabase
     .from('content_calendar')
-    .select('*')
+    .select(CONTENT_CALENDAR_COLS)
     .order('scheduled_at', { ascending: true });
   if (error) throw error;
-  return data as ContentCalendar[];
+  return (data || []) as ContentCalendar[];
 }
 
 // ═══ GAMES ═══
 export async function getGames() {
   const { data, error } = await supabase
     .from('games')
-    .select('*')
+    .select('id,name,category,min_players,max_players,difficulty,tutorial_url,created_at')
     .order('name');
   if (error) throw error;
-  return data;
+  return data || [];
 }
 
 // ═══ CONDO GAMES ═══
 export async function getCondoGames(condoId: string) {
   const { data, error } = await supabase
     .from('condo_games')
-    .select('*, game:games(*)')
+    .select(
+      'id,condo_id,game_id,status,installed_at,next_swap_at, game:games(id,name,category,min_players,max_players,difficulty)'
+    )
     .eq('condo_id', condoId);
   if (error) throw error;
-  return data;
+  return data || [];
 }
 
 // ═══ KPIs ═══
 export async function getDashboardKpis() {
   const [condos, conversations, searchLogs, agentLogs] = await Promise.all([
     getCondos(),
-    getConversations(),
-    getSearchLogs(),
+    getConversations({ pageSize: 200 }),
+    getSearchLogs({ pageSize: 100 }),
     getAgentLogs(),
   ]);
 

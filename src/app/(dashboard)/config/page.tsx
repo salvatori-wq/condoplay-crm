@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Tag } from '@/components/ui/tag';
 import { AGENTS, type AgentType } from '@/types/database';
@@ -24,6 +24,13 @@ export default function ConfigPage() {
   const [waLoading, setWaLoading] = useState(false);
   const [qrData, setQrData] = useState<QrCodeData | null>(null);
   const [waError, setWaError] = useState<string | null>(null);
+
+  // Prompt editing state
+  const [prompts, setPrompts] = useState<Record<string, string>>({ ...AGENT_PROMPTS });
+  const [editedPrompt, setEditedPrompt] = useState('');
+  const [promptSaving, setPromptSaving] = useState(false);
+  const [promptFeedback, setPromptFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
   const agent = AGENTS[selectedAgent];
 
   useEffect(() => {
@@ -45,6 +52,54 @@ export default function ConfigPage() {
 
     fetchStatus();
   }, []);
+
+  // Load saved prompts from DB
+  useEffect(() => {
+    const loadPrompts = async () => {
+      try {
+        const res = await fetch('/api/agents/prompts');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.prompts) {
+            setPrompts(data.prompts);
+          }
+        }
+      } catch (err) {
+        console.error('[LoadPrompts]', err);
+      }
+    };
+    loadPrompts();
+  }, []);
+
+  // Sync editedPrompt when agent selection or prompts change
+  useEffect(() => {
+    setEditedPrompt(prompts[selectedAgent] || AGENT_PROMPTS[selectedAgent]);
+    setPromptFeedback(null);
+  }, [selectedAgent, prompts]);
+
+  const handleSavePrompt = useCallback(async () => {
+    setPromptSaving(true);
+    setPromptFeedback(null);
+    try {
+      const res = await fetch('/api/agents/prompts', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentType: selectedAgent, prompt: editedPrompt }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || data.detail || 'Erro ao salvar');
+      }
+      setPrompts(prev => ({ ...prev, [selectedAgent]: editedPrompt }));
+      setPromptFeedback({ type: 'success', message: 'Prompt salvo com sucesso!' });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Erro ao salvar prompt';
+      setPromptFeedback({ type: 'error', message: msg });
+    } finally {
+      setPromptSaving(false);
+      setTimeout(() => setPromptFeedback(null), 4000);
+    }
+  }, [selectedAgent, editedPrompt]);
 
   const handleConnectWhatsApp = async () => {
     setWaLoading(true);
@@ -131,9 +186,39 @@ export default function ConfigPage() {
           </div>
           <Tag color={agent.color}>System Prompt</Tag>
         </div>
-        <pre className="text-[11px] text-[#cbd5e1] leading-relaxed whitespace-pre-wrap bg-[#0a0a14] rounded-lg p-4 border border-[#1e293b]">
-          {AGENT_PROMPTS[selectedAgent]}
-        </pre>
+        <textarea
+          value={editedPrompt}
+          onChange={(e) => setEditedPrompt(e.target.value)}
+          rows={12}
+          className="w-full text-[11px] text-[#cbd5e1] leading-relaxed whitespace-pre-wrap bg-[#0a0a14] rounded-lg p-4 border border-[#1e293b] focus:border-[#6366f1] focus:outline-none resize-y font-mono"
+          spellCheck={false}
+        />
+        <div className="flex items-center gap-3 mt-3">
+          <button
+            onClick={handleSavePrompt}
+            disabled={promptSaving || editedPrompt === (prompts[selectedAgent] || AGENT_PROMPTS[selectedAgent])}
+            className="px-4 py-2 text-xs font-bold rounded-lg transition-colors disabled:opacity-40"
+            style={{
+              backgroundColor: agent.color,
+              color: '#0a0a14',
+            }}
+          >
+            {promptSaving ? 'Salvando...' : 'Salvar Prompt'}
+          </button>
+          {editedPrompt !== (prompts[selectedAgent] || AGENT_PROMPTS[selectedAgent]) && (
+            <button
+              onClick={() => setEditedPrompt(prompts[selectedAgent] || AGENT_PROMPTS[selectedAgent])}
+              className="px-3 py-2 text-[11px] text-[#94a3b8] hover:text-[#e2e8f0] transition-colors"
+            >
+              Descartar alteracoes
+            </button>
+          )}
+          {promptFeedback && (
+            <span className={`text-[11px] font-bold ${promptFeedback.type === 'success' ? 'text-[#4ade80]' : 'text-[#ef4444]'}`}>
+              {promptFeedback.message}
+            </span>
+          )}
+        </div>
       </Card>
 
       {/* WhatsApp Panel */}

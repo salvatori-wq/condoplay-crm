@@ -15,10 +15,10 @@ export async function POST(req: NextRequest) {
     }
 
     const { data, error } = await supabase
-      .from('WhatsAppConversa')
-      .update({ arquivada: archived !== false, atualizadoEm: new Date().toISOString() })
+      .from('conversations')
+      .update({ status: archived !== false ? 'encerrado' : 'ativo', updated_at: new Date().toISOString() })
       .in('id', conversationIds)
-      .select('id, arquivada');
+      .select('id, status');
 
     if (error) {
       console.error('[Archive] Error:', error);

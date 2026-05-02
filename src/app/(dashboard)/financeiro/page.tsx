@@ -31,7 +31,7 @@ export default function FinanceiroPage() {
     setError(null);
     Promise.all([getInvoices(), getCondos(), getSearchLogs()])
       .then(([inv, c, sl]) => { setInvoices(inv); setCondos(c); setSearchLogs(sl); })
-      .catch(err => setError(err instanceof Error ? err.message : String(err)))
+      .catch(err => setError(err instanceof Error ? err.message : JSON.stringify(err)))
       .finally(() => setLoading(false));
   }, []);
 
@@ -39,7 +39,6 @@ export default function FinanceiroPage() {
 
   if (loading) return <LoadingState label="financeiro" />;
   if (error) return <ErrorState message={error} onRetry={loadData} />;
-  if (invoices.length === 0) return <EmptyState label="financeiro" />;
 
   const currentMonth = getCurrentMonth();
   const mrr = condos.filter(c => c.status === 'ativo').reduce((s, c) => s + Number(c.monthly_plan), 0);
@@ -71,7 +70,9 @@ export default function FinanceiroPage() {
             </tr>
           </thead>
           <tbody>
-            {currentInvoices.map(inv => {
+            {currentInvoices.length === 0 ? (
+              <tr><td colSpan={5} className="p-4 text-center text-[#475569] text-[11px]">Nenhuma fatura neste mes</td></tr>
+            ) : currentInvoices.map(inv => {
               const condo = condos.find(c => c.id === inv.condo_id);
               return (
                 <tr key={inv.id}>
@@ -99,6 +100,9 @@ export default function FinanceiroPage() {
             </tr>
           </thead>
           <tbody>
+            {invoices.filter(i => i.month !== currentMonth).length === 0 && (
+              <tr><td colSpan={4} className="p-4 text-center text-[#475569] text-[11px]">Nenhuma fatura anterior</td></tr>
+            )}
             {invoices.filter(i => i.month !== currentMonth).map(inv => {
               const condo = condos.find(c => c.id === inv.condo_id);
               return (

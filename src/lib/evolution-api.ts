@@ -1,6 +1,7 @@
 // ═══ EVOLUTION API CLIENT — WhatsApp Integration ═══
 
 import { getEvolutionConfig } from './env';
+import { normalizePhone as normalizePhoneBase } from './utils';
 
 function getConfig() {
   return getEvolutionConfig();
@@ -170,7 +171,7 @@ export async function checkNumberExists(phone: string) {
 // ═══ PHONE NORMALIZATION ═══
 
 function normalizePhone(phone: string): string {
-  const digits = phone.replace(/\D/g, '').replace(/^0+/, '');
+  const digits = normalizePhoneBase(phone);
   if (!digits || digits.length < 8) {
     throw new Error(`Invalid phone number: ${phone}`);
   }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sendTextMessage } from '@/lib/evolution-api';
 import { supabaseServer as supabase } from '@/lib/supabase-server';
 import { DEFAULT_TENANT_ID } from '@/lib/env';
+import { normalizePhone } from '@/lib/utils';
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Normalize phone
-    const normalizedPhone = phone.replace(/\D/g, '').replace(/^0+/, '');
+    const normalizedPhone = normalizePhone(phone);
 
     // Send via Evolution API (encoding handled inside sendTextMessage)
     let result;
@@ -39,7 +40,6 @@ export async function POST(req: NextRequest) {
       if (existing && existing.length > 0) {
         convId = existing[0].id;
       } else {
-        // Check if phone matches a lead
         const phoneVariants = [normalizedPhone];
         if (normalizedPhone.startsWith('55')) {
           phoneVariants.push(normalizedPhone.substring(2));
@@ -60,12 +60,11 @@ export async function POST(req: NextRequest) {
           .insert({
             tenant_id: DEFAULT_TENANT_ID,
             lead_id: lead?.id || null,
-            condo_id: null,
             agent_type: agentType || (lead ? 'loki' : 'hawkeye'),
             channel: 'whatsapp',
             contact_name: lead?.name || contactName || normalizedPhone,
             contact_phone: normalizedPhone,
-            contact_role: lead?.role || 'Prospeccao WhatsApp',
+            contact_role: lead?.role || 'Sindico',
             status: 'ativo',
             unread: 0,
           })

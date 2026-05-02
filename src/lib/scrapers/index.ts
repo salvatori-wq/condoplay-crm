@@ -2,13 +2,15 @@
 // Ordem de prioridade:
 //   1. CondominioemFoco (telefones diretos, mais confiável)
 //   2. CNPJ Enrichment (dados públicos Receita Federal)
-//   3. Google Maps (maior volume, menos preciso)
+//   3. SindicoNet (diretório de síndicos/administradoras)
+//   4. Google Search (Custom Search API ou fallback HTML)
 //
 // Deduplicação por telefone. Meta: 10-15 contatos/dia.
 
 import { scrapeCondominioemFoco, type ScrapedContact } from './condominio-em-foco';
 import { scrapeCnpjEnrichment } from './cnpj-enrichment';
-import { scrapeGoogleMaps } from './google-maps';
+import { scrapeSindicoNet } from './sindiconet';
+import { scrapeGoogleSearch } from './google-search';
 
 export type { ScrapedContact } from './condominio-em-foco';
 
@@ -17,7 +19,8 @@ export interface ScraperResult {
   sources: {
     condominioemfoco: number;
     cnpj: number;
-    google_maps: number;
+    sindiconet: number;
+    google: number;
   };
   errors: string[];
   elapsed_ms: number;
@@ -34,7 +37,7 @@ export async function runAllScrapers(options?: {
   const allContacts: ScrapedContact[] = [];
   const seenPhones = new Set<string>();
   const errors: string[] = [];
-  const sources = { condominioemfoco: 0, cnpj: 0, google_maps: 0 };
+  const sources = { condominioemfoco: 0, cnpj: 0, sindiconet: 0, google: 0 };
 
   // Helper: adiciona contatos sem duplicatas
   const addContacts = (contacts: ScrapedContact[], sourceName: keyof typeof sources) => {
@@ -78,26 +81,42 @@ export async function runAllScrapers(options?: {
     }
   }
 
-  // ═══ 3. Google Maps (fallback para completar a meta) ═══
-  if (!skip.has('google_maps') && allContacts.length < target) {
+  // ═══ 3. SindicoNet (fallback para completar a meta) ═══
+  if (!skip.has('sindiconet') && allContacts.length < target) {
     try {
-      console.log('[Orchestrator] Running Google Maps scraper...');
-      const gmContacts = await scrapeGoogleMaps({
+      console.log('[Orchestrator] Running SindicoNet scraper...');
+      const snContacts = await scrapeSindicoNet({
         maxResults: target - allContacts.length + 3,
       });
-      addContacts(gmContacts, 'google_maps');
-      console.log(`[Orchestrator] GoogleMaps: ${gmContacts.length} found, ${sources.google_maps} unique`);
+      addContacts(snContacts, 'sindiconet');
+      console.log(`[Orchestrator] SindicoNet: ${snContacts.length} found, ${sources.sindiconet} unique`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      errors.push(`GoogleMaps: ${msg}`);
-      console.error('[Orchestrator] GoogleMaps error:', msg);
+      errors.push(`SindicoNet: ${msg}`);
+      console.error('[Orchestrator] SindicoNet error:', msg);
+    }
+  }
+
+  // ═══ 4. Google Search (free tier: 100 queries/dia, 2-3 por run) ═══
+  if (!skip.has('google') && allContacts.length < target) {
+    try {
+      console.log('[Orchestrator] Running Google Search scraper...');
+      const googleContacts = await scrapeGoogleSearch({
+        maxResults: target - allContacts.length + 3,
+      });
+      addContacts(googleContacts, 'google');
+      console.log(`[Orchestrator] Google: ${googleContacts.length} found, ${sources.google} unique`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`Google Search: ${msg}`);
+      console.error('[Orchestrator] Google Search error:', msg);
     }
   }
 
   const elapsed_ms = Date.now() - startTime;
 
   console.log(`[Orchestrator] Total: ${allContacts.length} unique contacts in ${(elapsed_ms / 1000).toFixed(1)}s`);
-  console.log(`[Orchestrator] Sources: Foco=${sources.condominioemfoco}, CNPJ=${sources.cnpj}, GMaps=${sources.google_maps}`);
+  console.log(`[Orchestrator] Sources: Foco=${sources.condominioemfoco}, CNPJ=${sources.cnpj}, SindicoNet=${sources.sindiconet}, Google=${sources.google}`);
 
   return {
     contacts: allContacts.slice(0, target), // Limita à meta

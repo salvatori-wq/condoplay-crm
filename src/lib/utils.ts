@@ -38,3 +38,25 @@ export function calculateFee(hoursElapsed: number): number {
   if (hoursElapsed <= 24) return 0;
   return Math.ceil(hoursElapsed / 24 - 1) * 30;
 }
+
+// ═══ PHONE NORMALIZATION ═══
+// Fonte única: remove tudo que não é dígito e zeros à esquerda.
+// Usar em hawkeye, LOKI, webhook Evolution e UI de conversas para garantir match.
+export function normalizePhone(phone: string | null | undefined): string {
+  if (!phone) return '';
+  return phone.replace(/\D/g, '').replace(/^0+/, '');
+}
+
+// Retorna [numero, numero_com_55, numero_sem_55] para queries que precisam
+// procurar o mesmo telefone com ou sem DDI.
+export function phoneVariants(phone: string | null | undefined): string[] {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return [];
+  const variants = new Set<string>([normalized]);
+  if (normalized.startsWith('55')) {
+    variants.add(normalized.substring(2));
+  } else {
+    variants.add(`55${normalized}`);
+  }
+  return Array.from(variants);
+}

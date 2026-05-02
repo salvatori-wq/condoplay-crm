@@ -5,13 +5,14 @@
 // Fontes (prioridade):
 //   1. CondominioemFoco.com.br — telefones diretos de administradoras
 //   2. CNPJ Enrichment — BrasilAPI/ReceitaWS (dados publicos Receita Federal)
-//   3. Google Maps — busca administradoras de condominios
+//   3. SindicoNet — diretório de síndicos/administradoras
 //   4. Apollo.io (fallback, precisa de API key paga)
 
 import { NextResponse } from 'next/server';
 import { runAllScrapers, type ScrapedContact } from '@/lib/scrapers';
 import { supabaseServer as supabase } from '@/lib/supabase-server';
 import { DEFAULT_TENANT_ID } from '@/lib/env';
+import { normalizePhone, phoneVariants } from '@/lib/utils';
 
 const DAILY_TARGET = 10;
 
@@ -25,7 +26,7 @@ export async function POST() {
     withoutPhone: 0,
     errors: [] as string[],
     lokiQueued: 0,
-    sources: { condominioemfoco: 0, cnpj: 0, google_maps: 0, apollo: 0 },
+    sources: { condominioemfoco: 0, cnpj: 0, sindiconet: 0, google: 0, apollo: 0 },
   };
 
   try {
@@ -44,7 +45,8 @@ export async function POST() {
       results.searched = scrapedContacts.length;
       results.sources.condominioemfoco = scraperResult.sources.condominioemfoco;
       results.sources.cnpj = scraperResult.sources.cnpj;
-      results.sources.google_maps = scraperResult.sources.google_maps;
+      results.sources.sindiconet = scraperResult.sources.sindiconet;
+      results.sources.google = scraperResult.sources.google;
 
       if (scraperResult.errors.length > 0) {
         results.errors.push(...scraperResult.errors);
@@ -56,7 +58,8 @@ export async function POST() {
         `Scrapers encontraram ${scrapedContacts.length} contatos: ` +
         `Foco=${scraperResult.sources.condominioemfoco}, ` +
         `CNPJ=${scraperResult.sources.cnpj}, ` +
-        `GMaps=${scraperResult.sources.google_maps}`
+        `SindicoNet=${scraperResult.sources.sindiconet}, ` +
+        `Google=${scraperResult.sources.google}`
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -72,24 +75,37 @@ export async function POST() {
           perPage: DAILY_TARGET - scrapedContacts.length + 3,
         });
 
+        // Pre-call dedup: Apollo custa crédito por lead, então descartamos
+        // duplicatas ANTES de aceitar o contato (antes só descartávamos depois do insert).
+        let apolloDuplicates = 0;
         for (const lead of apolloLeads) {
-          if (lead.phone) {
-            scrapedContacts.push({
-              name: lead.name,
-              phone: lead.phone,
-              fax: null,
-              website: null,
-              email: lead.email,
-              neighborhood: null,
-              source: 'apollo',
-              city: lead.city,
-              state: lead.state,
-            });
-            results.sources.apollo++;
+          if (!lead.phone) continue;
+          const normalized = normalizePhone(lead.phone);
+          if (!normalized) continue;
+
+          const isDup = await checkDuplicate(normalized, lead.email);
+          if (isDup) {
+            apolloDuplicates++;
+            continue;
           }
+
+          scrapedContacts.push({
+            name: lead.name,
+            phone: normalized,
+            fax: null,
+            website: null,
+            email: lead.email,
+            neighborhood: null,
+            source: 'apollo',
+            city: lead.city,
+            state: lead.state,
+          });
+          results.sources.apollo++;
         }
 
-        console.log(`[HAWKEYE] Apollo added ${results.sources.apollo} contacts`);
+        console.log(
+          `[HAWKEYE] Apollo added ${results.sources.apollo} contacts (${apolloDuplicates} duplicatas ignoradas)`
+        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         results.errors.push(`Apollo fallback failed: ${msg}`);
@@ -100,7 +116,16 @@ export async function POST() {
     // ═══ PHASE 3: Save leads & queue LOKI ═══
     if (scrapedContacts.length === 0) {
       await logAction('Nenhum contato encontrado hoje. Verificar scrapers.');
-      return NextResponse.json({ ok: false, results, error: 'No contacts found' });
+      await saveSearchLog({
+        source: 'hawkeye',
+        query: `Prospeccao diaria — 0 contatos (scrapers falharam)`,
+        results_count: 0,
+        qualified_count: 0,
+        leads_found: [],
+        cost: 0,
+        errors: results.errors,
+      });
+      return NextResponse.json({ ok: true, results, warning: 'No contacts found — scrapers may be down' });
     }
 
     let savedCount = 0;
@@ -113,7 +138,7 @@ export async function POST() {
       }
 
       // Check for duplicates (use normalized phone)
-      const normalizedPhone = contact.phone.replace(/\D/g, '').replace(/^0+/, '');
+      const normalizedPhone = normalizePhone(contact.phone);
       const isDuplicate = await checkDuplicate(normalizedPhone, contact.email);
       if (isDuplicate) {
         results.duplicates++;
@@ -217,8 +242,19 @@ export async function POST() {
       `${results.newLeads} novos leads, ${results.withPhone} com telefone, ` +
       `${results.lokiQueued} agendados para LOKI. ` +
       `Fontes: Foco=${results.sources.condominioemfoco} CNPJ=${results.sources.cnpj} ` +
-      `GMaps=${results.sources.google_maps} Apollo=${results.sources.apollo}`
+      `SindicoNet=${results.sources.sindiconet} Google=${results.sources.google} Apollo=${results.sources.apollo}`
     );
+
+    // Save search_log so Buscas page shows the run
+    await saveSearchLog({
+      source: 'hawkeye',
+      query: `Prospeccao diaria — meta ${DAILY_TARGET}`,
+      results_count: results.searched,
+      qualified_count: results.newLeads,
+      leads_found: scrapedContacts.slice(0, 20).map(c => c.name),
+      cost: 0,
+      errors: results.errors,
+    });
 
     console.log(`[HAWKEYE] Done. ${results.newLeads} new leads, ${results.lokiQueued} queued for LOKI`);
 
@@ -238,12 +274,8 @@ async function checkDuplicate(phone: string | null, email: string | null): Promi
 
   const conditions: string[] = [];
   if (phone) {
-    // Check both with and without country code
-    conditions.push(`phone.eq.${phone}`);
-    if (phone.startsWith('55')) {
-      conditions.push(`phone.eq.${phone.substring(2)}`);
-    } else {
-      conditions.push(`phone.eq.55${phone}`);
+    for (const variant of phoneVariants(phone)) {
+      conditions.push(`phone.eq.${variant}`);
     }
   }
   if (email) conditions.push(`email.eq.${email}`);
@@ -255,6 +287,33 @@ async function checkDuplicate(phone: string | null, email: string | null): Promi
     .limit(1);
 
   return !!(data && data.length > 0);
+}
+
+async function saveSearchLog(params: {
+  source: string;
+  query: string;
+  results_count: number;
+  qualified_count: number;
+  leads_found: string[];
+  cost: number;
+  errors: string[];
+}) {
+  try {
+    const { error } = await supabase.from('search_logs').insert({
+      tenant_id: DEFAULT_TENANT_ID,
+      source: params.source,
+      query: params.query,
+      results_count: params.results_count,
+      qualified_count: params.qualified_count,
+      leads_found: params.leads_found,
+      cost: params.cost,
+    });
+    if (error) {
+      console.error(`[HAWKEYE] search_logs insert error: ${error.message}`);
+    }
+  } catch (err) {
+    console.error('[HAWKEYE] Failed to save search log:', err instanceof Error ? err.message : err);
+  }
 }
 
 async function logAction(
@@ -272,17 +331,18 @@ async function logAction(
       metadata: metadata || { source: 'hawkeye_daily_run' },
     });
     if (error) {
-      console.error(`[HAWKEYE] agent_logs insert error: ${error.message}`);
+      // Table may not exist yet — log but don't crash
+      console.warn(`[HAWKEYE] agent_logs: ${error.message}`);
     }
   } catch (err) {
-    console.error('[HAWKEYE] Failed to log action:', err instanceof Error ? err.message : err);
+    console.warn('[HAWKEYE] agent_logs unavailable:', err instanceof Error ? err.message : err);
   }
 }
 
 // Health check
 export async function GET() {
   const apolloConfigured = !!process.env.APOLLO_API_KEY;
-  const googleMapsConfigured = !!process.env.GOOGLE_MAPS_API_KEY;
+  const googleConfigured = !!(process.env.GOOGLE_SEARCH_API_KEY && process.env.GOOGLE_SEARCH_CX);
 
   return NextResponse.json({
     agent: 'hawkeye',
@@ -291,8 +351,8 @@ export async function GET() {
     sources: {
       condominioemfoco: 'active (free)',
       cnpj_enrichment: 'active (free)',
-      google_maps: 'active (free scraping)',
-      google_maps_api: googleMapsConfigured ? 'active (API key)' : 'inactive (no API key)',
+      sindiconet: 'active (free scraping)',
+      google_search: googleConfigured ? 'active (API key)' : 'active (HTML fallback)',
       apollo: apolloConfigured ? 'active (API key)' : 'inactive (no API key)',
     },
     timestamp: new Date().toISOString(),
